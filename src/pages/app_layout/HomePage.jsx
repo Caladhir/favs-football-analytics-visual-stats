@@ -1,5 +1,5 @@
 import { useState } from "react";
-import Header from "../../components/Header";
+import Header from "../../ui/Header";
 import AllMatches from "../../components/Tabs/AllMatches";
 import LiveMatches from "../../components/Tabs/LiveMatches";
 

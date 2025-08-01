@@ -16,7 +16,7 @@ export default function Button({
     <button
       onClick={onClick}
       className={clsx(
-        "flex items-center gap-2 h-10 px-4 py-2.5 rounded text-sm text-clip border transition-colors",
+        "flex items-center gap-2 h-10 px-4 py-2.5 rounded text-sm text-clip border transition-colors transition-all duration-300  ease-out hover:scale-103",
         active
           ? "bg-red-950 text-white font-medium border-red-400"
           : "text-gray-200 border-transparent hover:border-gray-300 hover:bg-gray-700",

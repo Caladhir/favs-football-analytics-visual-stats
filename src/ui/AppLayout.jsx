@@ -1,14 +1,13 @@
-// src/layouts/AppLayout.jsx
 import { Outlet } from "react-router-dom";
-import Header from "../components/Header";
+import Header from "../ui/Header";
 
 export default function AppLayout() {
   return (
-    <div>
+    <>
       <Header />
-      <main className="p-4">
+      <main className="pt-4 px-2 sm:px-6 lg:px-8">
         <Outlet />
       </main>
-    </div>
+    </>
   );
 }
