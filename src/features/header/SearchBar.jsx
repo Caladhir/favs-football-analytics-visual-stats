@@ -27,19 +27,19 @@ export default function SearchBar({ className = "" }) {
 
   return (
     <div
-      className={` transition-[width] duration-300 ease-out ${className}`}
+      className={` transition-[width]  duration-300 ease-out ${className}`}
       style={{ width: computedWidth }}
     >
       {!expanded && (
         <button
           onClick={open}
-          className="w-full h-14 flex items-center justify-center rounded-full hover:bg-black/20 transition"
+          className="w-full h-14 flex items-center justify-center rounded-full hover:bg-slate-400/40 transition"
         >
           <Icon
             icon="jam:search"
             width={28}
             height={28}
-            className="text-red-500"
+            className="text-red-500 text-outline"
           />
         </button>
       )}

@@ -18,7 +18,7 @@ export default function App() {
       >
         <Routes>
           <Route element={<AppLayout />}>
-            <Route index element={<HomePage />} />
+            <Route path="/" index element={<HomePage />} />
             <Route path="match/:id" element={<MatchPage />} />
             <Route path="*" element={<PageNotFound />} />
           </Route>

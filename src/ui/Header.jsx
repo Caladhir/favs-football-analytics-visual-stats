@@ -1,112 +1,83 @@
-import { useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "@iconify-icon/react";
+
 import SearchBar from "../features/header/SearchBar";
-import IconWithSkeleton from "../features/header/IconWithSkeleton";
-
-const navItems = [
-  { name: "Dashboard", path: "/dashboard", icon: "fluent-mdl2:dashboard-add" },
-  { name: "Matches", path: "/matches", icon: "ph:soccer-ball-bold" },
-  { name: "Teams", path: "/teams", icon: "mdi:shield-account" },
-  { name: "Players", path: "/players", icon: "game-icons:babyfoot-players" },
-];
-
-const profileItems = [
-  {
-    name: "Profil",
-    icon: "mdi:account",
-    action: () => alert("Profil soon..."),
-  },
-  {
-    name: "Favoriti",
-    icon: "mdi:heart-outline",
-    action: () => alert("Favoriti soon..."),
-  },
-  {
-    name: "Postavke",
-    icon: "mdi:cog-outline",
-    action: () => alert("Postavke soon..."),
-  },
-  {
-    name: "Light/Dark mode",
-    icon: "mdi:theme-light-dark",
-    action: () => document.documentElement.classList.toggle("dark"),
-  },
-  {
-    name: "Sign out",
-    icon: "mdi:logout",
-    action: () => alert("Sign out soon..."),
-  },
-];
+import ProfileDropdown from "../features/header/ProfileDropdown";
+import Navigation from "../features/header/Navigation";
+import HamburgerMenu from "../features/header/HamburgerMenu";
 
 export default function Header() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const dropdownRef = useRef();
   const navigate = useNavigate();
 
+  // Zatvori dropdown kad klikneš van njega
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   return (
-    <header className="w-full h-20 bg-[#ddc9c7] border-b border-black px-8 flex items-center justify-between z-50 relative">
-      {/* Lijevo: Logo + FAVS link */}
+    <header className="w-full h-20 bg-background border-b border-border px-6 flex items-center justify-between z-50 relative">
+      {/* Lijevo: Logo + Naziv */}
       <div
-        className="flex items-center gap-3 cursor-pointer"
-        onClick={() => navigate("/homepage")}
+        className="flex items-center gap-3 cursor-pointer transition-all duration-300 ease-in-out "
+        onClick={() => navigate("/")}
       >
         <img
           src="/favs-logo.svg"
           alt="FAVS Logo"
-          className="h-12 w-12 rounded-full object-cover"
+          className="h-10 w-10 rounded-full object-cover"
         />
-        <span className="text-2xl font-semibold text-green-900">FAVS</span>
+        <span className="text-2xl font-semibold hover:text-primary transition-all duration-300 ease-in-out ">
+          FAVS
+        </span>
       </div>
 
-      {/* Sredina: Navigacija s ikonama */}
-      <nav className="hidden md:flex gap-10 text-lg font-medium text-black items-center">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            className={({ isActive }) =>
-              `flex items-center gap-2 hover:text-green-700 transition ${
-                isActive
-                  ? "font-bold text-green-800 underline underline-offset-4"
-                  : ""
-              }`
-            }
+      {/* Sredina: Navigacija za desktop */}
+      <Navigation />
+
+      {/* Desno: Search + Avatar + Hamburger */}
+      <div className="flex items-center gap-4 relative ">
+        <SearchBar className="relative z-20 block w-32 sm:w-48 md:w-60 " />
+
+        {/* Profil avatar dropdown */}
+        <div ref={dropdownRef} className="relative hidden md:block ">
+          <button
+            onClick={() => setDropdownOpen((prev) => !prev)}
+            className="rounded-full px-1 p-0.5 hover:bg-accent transition-all duration-300 ease-in-out"
           >
-            <IconWithSkeleton icon={item.icon} width={20} height={20} />
-            <span>{item.name}</span>
-          </NavLink>
-        ))}
-      </nav>
+            <Icon icon="mdi:account-circle-outline" width={28} height={28} />
+          </button>
 
-      {/* Desno: Search + Profil dropdown */}
-      <div className="flex items-center gap-4 relative">
-        <SearchBar className="relative z-20" />
+          {dropdownOpen && (
+            <div className="absolute right-0 top-12 z-50">
+              <ProfileDropdown onItemClick={() => setDropdownOpen(false)} />
+            </div>
+          )}
+        </div>
 
+        {/* Hamburger meni za mobilni prikaz */}
         <button
-          onClick={() => setDropdownOpen((prev) => !prev)}
-          className="p-1 rounded-full hover:bg-black/10 transition"
+          className="md:hidden flex items-center justify-center p-2"
+          onClick={() => setMobileNavOpen((prev) => !prev)}
         >
-          <Icon icon="mdi:account-circle-outline" width={28} height={28} />
+          <Icon icon="mdi:menu" width={28} height={28} />
         </button>
-
-        {dropdownOpen && (
-          <div className="absolute right-0 top-14 w-52 rounded bg-white shadow-lg border z-50 p-2 space-y-1">
-            {profileItems.map((item) => (
-              <button
-                key={item.name}
-                onClick={() => {
-                  item.action();
-                  setDropdownOpen(false);
-                }}
-                className="flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-gray-100 rounded text-sm"
-              >
-                <Icon icon={item.icon} width={18} />
-                <span>{item.name}</span>
-              </button>
-            ))}
-          </div>
-        )}
       </div>
+
+      {/* Mobilna navigacija */}
+      <HamburgerMenu
+        isOpen={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
+      />
     </header>
   );
 }

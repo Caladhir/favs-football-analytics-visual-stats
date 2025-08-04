@@ -2,68 +2,76 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Design system: boje u HSL formatu, kompatibilno s Tailwind varijablama */
 @layer base {
   :root {
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
+    --card: var(--background);
+    --card-foreground: var(--foreground);
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
+    --popover: var(--background);
+    --popover-foreground: var(--foreground);
 
-    --primary: 0 72.2% 50.6%;
+    --primary: 0 72.2% 50.6%; /* čista crvena */
     --primary-foreground: 0 85.7% 97.3%;
 
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 240 5.9% 10%;
 
-    --muted: 240 4.8% 95.9%;
+    --muted: 240 4.8% 92%;
     --muted-foreground: 240 3.8% 46.1%;
 
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
+    --accent: 10 80% 90%; /* svjetlija crveno-narančasta */
+    --accent-foreground: 10 90% 30%; /* tamno crvena/narančasta za tekst */
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
 
     --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
+    --input: var(--border);
     --ring: 240 5.9% 10%;
 
     --radius: 0.5rem;
   }
 
   .dark {
-    --background: 240 10% 3.9%;
+    --background: 350 20% 10%;
     --foreground: 0 0% 98%;
 
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
+    --card: 350 25% 12%;
+    --card-foreground: var(--foreground);
 
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
+    --popover: var(--card);
+    --popover-foreground: var(--foreground);
 
     --primary: 0 72.2% 50.6%;
     --primary-foreground: 0 85.7% 97.3%;
 
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
+    --secondary: 0 15% 20%;
+    --secondary-foreground: 0 0% 95%;
 
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
+    --muted: 350 10% 18%;
+    --muted-foreground: 0 0% 80%;
 
-    --accent: 240 3.7% 15.9%;
+    --accent: 0 65% 35%; /* tamnocrveni naglasak */
     --accent-foreground: 0 0% 98%;
 
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 85.7% 97.3%;
 
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    --border: 350 15% 25%;
+    --input: 350 15% 20%;
+    --ring: 0 75% 45%;
+  }
+  @layer utilities {
+    .text-outline {
+      -webkit-text-stroke: 1px black;
+    }
+
+    .dark .text-outline {
+      -webkit-text-stroke: 0.25px white;
+    }
   }
 
   body {

@@ -21,20 +21,22 @@ export default function LiveMatches() {
   }, []);
 
   return (
-    <ul className="space-y-2 max-w-md mx-auto">
+    <ul className="space-y-2 max-w-md mx-auto ">
       {matches.map((match) => (
-        <li key={match.id} className="p-3 bg-gray-100 rounded shadow">
-          <p className="text-center font-bold">
+        <li key={match.id} className="p-3 bg-muted rounded shadow">
+          <p className="text-center font-bold text-primary">
             {match.date} {match.time} - {match.tournament}
           </p>
-          <p className="text-center">
+          <p className="text-center text-foreground">
             {match.homeTeam} vs {match.awayTeam}
           </p>
-          <div className="flex flex-col items-center justify-between mt-2 text-sm text-gray-700">
-            <span className="px-2 py-1 rounded bg-red-100 text-red-700 font-bold">
-              {match.minute ? `${match.minute}'` : "U tijeku"}
+          <div className="flex flex-col items-center justify-between mt-2 text-sm text-muted-foreground">
+            <span className="px-2 py-1 rounded bg-destructive text-destructive-foreground font-bold">
+              {match.minute !== null && match.minute !== undefined
+                ? `${match.minute}'`
+                : match.status}
             </span>
-            <span className="font-bold text-red-700">{match.score}</span>
+            <span className="font-bold text-primary ">{match.score}</span>
           </div>
         </li>
       ))}
