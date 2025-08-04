@@ -1,0 +1,57 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+
+export default function UpcomingMatches() {
+  const [matches, setMatches] = useState([]);
+
+  useEffect(() => {
+    const fetchMatches = async () => {
+      try {
+        const res = await fetch("/scheduledMatches.json");
+        const data = await res.json();
+        const upcoming = data.filter(
+          (match) => match.statusType === "notstarted"
+        );
+        setMatches(upcoming);
+      } catch (err) {
+        console.error("Greška kod učitavanja podataka:", err);
+      }
+    };
+    fetchMatches();
+    const interval = setInterval(fetchMatches, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (matches.length === 0)
+    return (
+      <p className="text-center mt-8 text-muted-foreground">
+        No upcoming matches.
+      </p>
+    );
+
+  return (
+    <ul className="space-y-2 max-w-md mx-auto">
+      {matches.map((match) => (
+        <li key={match.id} className="p-3 bg-muted rounded shadow">
+          <Link to={`/match/${match.id}`}>
+            <p className="text-center font-bold text-muted-foreground">
+              {match.date} {match.time} - {match.tournament}
+            </p>
+            <p className="text-center text-foreground">
+              {match.homeTeam}{" "}
+              <span className="text-accent text-outline text-center mr-1">
+                vs
+              </span>
+              {match.awayTeam}
+            </p>
+            <div className="flex justify-center mt-2 text-sm text-muted-foreground">
+              <span className="px-2 py-1 rounded bg-accent">
+                {match.status}
+              </span>
+            </div>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}

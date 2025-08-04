@@ -10,6 +10,7 @@
     "tournament": "Brasileirão Betano",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754251640,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -25,6 +26,7 @@
     "tournament": "Brasileirão Betano",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754251485,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -40,6 +42,7 @@
     "tournament": "Brasileirão Betano",
     "minute": null,
     "timestamp": 1754256600,
+    "currentPeriodStartTimestamp": 1754260537,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -55,6 +58,7 @@
     "tournament": "Brasileirão Betano",
     "minute": null,
     "timestamp": 1754256600,
+    "currentPeriodStartTimestamp": 1754260488,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -70,6 +74,7 @@
     "tournament": "Brasileirão Betano",
     "minute": null,
     "timestamp": 1754260200,
+    "currentPeriodStartTimestamp": 1754264122,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -85,6 +90,7 @@
     "tournament": "Brasileirão Betano",
     "minute": null,
     "timestamp": 1754263800,
+    "currentPeriodStartTimestamp": 1754267644,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -100,6 +106,7 @@
     "tournament": "Brasileirão Betano",
     "minute": null,
     "timestamp": 1754348400,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -115,6 +122,7 @@
     "tournament": "Pro League",
     "minute": null,
     "timestamp": 1754220600,
+    "currentPeriodStartTimestamp": 1754224415,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -130,6 +138,7 @@
     "tournament": "Pro League",
     "minute": null,
     "timestamp": 1754229600,
+    "currentPeriodStartTimestamp": 1754233536,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -145,6 +154,7 @@
     "tournament": "Pro League",
     "minute": null,
     "timestamp": 1754238600,
+    "currentPeriodStartTimestamp": 1754242548,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -160,6 +170,7 @@
     "tournament": "Pro League",
     "minute": null,
     "timestamp": 1754241300,
+    "currentPeriodStartTimestamp": 1754245274,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -175,6 +186,7 @@
     "tournament": "Scottish Premiership",
     "minute": null,
     "timestamp": 1754226000,
+    "currentPeriodStartTimestamp": 1754229738,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -190,6 +202,7 @@
     "tournament": "Scottish Premiership",
     "minute": null,
     "timestamp": 1754229600,
+    "currentPeriodStartTimestamp": 1754233327,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -205,6 +218,7 @@
     "tournament": "Scottish Premiership",
     "minute": null,
     "timestamp": 1754235000,
+    "currentPeriodStartTimestamp": 1754239005,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -220,6 +234,7 @@
     "tournament": "Scottish Premiership",
     "minute": null,
     "timestamp": 1754334000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -235,6 +250,7 @@
     "tournament": "HNL",
     "minute": null,
     "timestamp": 1754239500,
+    "currentPeriodStartTimestamp": 1754243267,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -250,6 +266,7 @@
     "tournament": "HNL",
     "minute": null,
     "timestamp": 1754250300,
+    "currentPeriodStartTimestamp": 1754254566,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -265,6 +282,7 @@
     "tournament": "HNL",
     "minute": null,
     "timestamp": 1754330400,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -280,6 +298,7 @@
     "tournament": "Mozzart Bet Superliga",
     "minute": null,
     "timestamp": 1754240400,
+    "currentPeriodStartTimestamp": 1754244548,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -295,6 +314,7 @@
     "tournament": "Mozzart Bet Superliga",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754251584,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -310,6 +330,7 @@
     "tournament": "Mozzart Bet Superliga",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -325,6 +346,7 @@
     "tournament": "Mozzart Bet Superliga",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -340,6 +362,7 @@
     "tournament": "2. Bundesliga",
     "minute": null,
     "timestamp": 1754220600,
+    "currentPeriodStartTimestamp": 1754224554,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -355,6 +378,7 @@
     "tournament": "2. Bundesliga",
     "minute": null,
     "timestamp": 1754220600,
+    "currentPeriodStartTimestamp": 1754224402,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -370,6 +394,7 @@
     "tournament": "2. Bundesliga",
     "minute": null,
     "timestamp": 1754220600,
+    "currentPeriodStartTimestamp": 1754224416,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -385,6 +410,7 @@
     "tournament": "Brasileirão Série B",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754251455,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -400,6 +426,7 @@
     "tournament": "Brasileirão Série B",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754251650,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -415,6 +442,7 @@
     "tournament": "Brasileirão Série B",
     "minute": null,
     "timestamp": 1754256600,
+    "currentPeriodStartTimestamp": 1754260438,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -430,6 +458,7 @@
     "tournament": "Brasileirão Série B",
     "minute": null,
     "timestamp": 1754344800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -445,6 +474,7 @@
     "tournament": "Brasileirão Série B",
     "minute": null,
     "timestamp": 1754353800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -460,6 +490,7 @@
     "tournament": "Austrian Bundesliga",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754237038,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -475,6 +506,7 @@
     "tournament": "Austrian Bundesliga",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754236906,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -490,6 +522,7 @@
     "tournament": "Chinese Super League",
     "minute": null,
     "timestamp": 1754218800,
+    "currentPeriodStartTimestamp": 1754223062,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -505,6 +538,7 @@
     "tournament": "Chinese Super League",
     "minute": null,
     "timestamp": 1754220900,
+    "currentPeriodStartTimestamp": 1754225150,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -520,6 +554,7 @@
     "tournament": "Chinese Super League",
     "minute": null,
     "timestamp": 1754220900,
+    "currentPeriodStartTimestamp": 1754225180,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -535,6 +570,7 @@
     "tournament": "Chinese Super League",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754226312,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -550,6 +586,7 @@
     "tournament": "Liga de Primera",
     "minute": null,
     "timestamp": 1754238600,
+    "currentPeriodStartTimestamp": 1754242626,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -565,6 +602,7 @@
     "tournament": "Liga de Primera",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754251744,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -580,6 +618,7 @@
     "tournament": "Liga de Primera",
     "minute": null,
     "timestamp": 1754256600,
+    "currentPeriodStartTimestamp": 1754260554,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -595,6 +634,7 @@
     "tournament": "Liga de Primera",
     "minute": null,
     "timestamp": 1754344800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -610,6 +650,7 @@
     "tournament": "Primera A, Clausura",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754251692,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -625,6 +666,7 @@
     "tournament": "Primera A, Clausura",
     "minute": null,
     "timestamp": 1754255400,
+    "currentPeriodStartTimestamp": 1754259390,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -640,6 +682,7 @@
     "tournament": "Primera A, Clausura",
     "minute": null,
     "timestamp": 1754263200,
+    "currentPeriodStartTimestamp": 1754267265,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -650,12 +693,13 @@
     "time": "03:30",
     "homeTeam": "Rionegro Águilas Doradas",
     "awayTeam": "Fortaleza CEIF",
-    "score": "0 - 0",
+    "score": "2 - 2",
     "status": "03:30",
     "tournament": "Primera A, Clausura",
     "minute": null,
     "timestamp": 1754271000,
-    "statusType": "inprogress",
+    "currentPeriodStartTimestamp": 1754274861,
+    "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
   },
@@ -670,6 +714,7 @@
     "tournament": "Czech First League",
     "minute": null,
     "timestamp": 1754226000,
+    "currentPeriodStartTimestamp": 1754229829,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -685,6 +730,7 @@
     "tournament": "Czech First League",
     "minute": null,
     "timestamp": 1754235000,
+    "currentPeriodStartTimestamp": 1754238927,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -700,6 +746,7 @@
     "tournament": "Czech First League",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754247793,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -715,6 +762,7 @@
     "tournament": "Ekstraklasa",
     "minute": null,
     "timestamp": 1754225100,
+    "currentPeriodStartTimestamp": 1754229362,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -730,6 +778,7 @@
     "tournament": "Ekstraklasa",
     "minute": null,
     "timestamp": 1754235000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "postponed",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -745,6 +794,7 @@
     "tournament": "Ekstraklasa",
     "minute": null,
     "timestamp": 1754235000,
+    "currentPeriodStartTimestamp": 1754239168,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -760,6 +810,7 @@
     "tournament": "Ekstraklasa",
     "minute": null,
     "timestamp": 1754244900,
+    "currentPeriodStartTimestamp": 1754249014,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -775,6 +826,7 @@
     "tournament": "Danish Superliga",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754226323,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -790,6 +842,7 @@
     "tournament": "Danish Superliga",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754226357,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -805,6 +858,7 @@
     "tournament": "Danish Superliga",
     "minute": null,
     "timestamp": 1754229600,
+    "currentPeriodStartTimestamp": 1754233661,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -820,6 +874,7 @@
     "tournament": "Danish Superliga",
     "minute": null,
     "timestamp": 1754236800,
+    "currentPeriodStartTimestamp": 1754240843,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -835,6 +890,7 @@
     "tournament": "League One",
     "minute": null,
     "timestamp": 1754218800,
+    "currentPeriodStartTimestamp": 1754222678,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -850,6 +906,7 @@
     "tournament": "División Profesional",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754251441,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -865,6 +922,7 @@
     "tournament": "División Profesional",
     "minute": null,
     "timestamp": 1754255700,
+    "currentPeriodStartTimestamp": 1754259933,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -880,6 +938,7 @@
     "tournament": "División Profesional",
     "minute": null,
     "timestamp": 1754263800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "postponed",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -895,6 +954,7 @@
     "tournament": "División Profesional",
     "minute": null,
     "timestamp": 1754334000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -910,6 +970,7 @@
     "tournament": "División Profesional",
     "minute": null,
     "timestamp": 1754343000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -925,6 +986,7 @@
     "tournament": "Primera División, Clausura",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754251548,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -940,6 +1002,7 @@
     "tournament": "Primera División, Clausura",
     "minute": null,
     "timestamp": 1754334000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -955,6 +1018,7 @@
     "tournament": "Primera División, Clausura",
     "minute": null,
     "timestamp": 1754343000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -970,6 +1034,7 @@
     "tournament": "LigaPro Serie A, Primera Etapa",
     "minute": null,
     "timestamp": 1754236800,
+    "currentPeriodStartTimestamp": 1754240909,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -985,6 +1050,7 @@
     "tournament": "LigaPro Serie A, Primera Etapa",
     "minute": null,
     "timestamp": 1754244900,
+    "currentPeriodStartTimestamp": 1754248910,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1000,6 +1066,7 @@
     "tournament": "LigaPro Serie A, Primera Etapa",
     "minute": null,
     "timestamp": 1754253000,
+    "currentPeriodStartTimestamp": 1754257297,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1015,6 +1082,7 @@
     "tournament": "LigaPro Serie A, Primera Etapa",
     "minute": null,
     "timestamp": 1754262000,
+    "currentPeriodStartTimestamp": 1754266158,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1030,6 +1098,7 @@
     "tournament": "LigaPro Serie A, Primera Etapa",
     "minute": null,
     "timestamp": 1754352000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1045,6 +1114,7 @@
     "tournament": "Premier Division",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754237056,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1060,6 +1130,7 @@
     "tournament": "Premier Division",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754247833,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1075,6 +1146,7 @@
     "tournament": "Eliteserien",
     "minute": null,
     "timestamp": 1754224200,
+    "currentPeriodStartTimestamp": 1754228061,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1090,6 +1162,7 @@
     "tournament": "Eliteserien",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754237174,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1105,6 +1178,7 @@
     "tournament": "Eliteserien",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754236997,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1120,6 +1194,7 @@
     "tournament": "Eliteserien",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754236947,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1135,6 +1210,7 @@
     "tournament": "Eliteserien",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754237036,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1150,6 +1226,7 @@
     "tournament": "Liga 1, Clausura",
     "minute": null,
     "timestamp": 1754251200,
+    "currentPeriodStartTimestamp": 1754255103,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1165,6 +1242,7 @@
     "tournament": "Liga 1, Clausura",
     "minute": null,
     "timestamp": 1754330400,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1180,6 +1258,7 @@
     "tournament": "Liga 1, Clausura",
     "minute": null,
     "timestamp": 1754337600,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1195,6 +1274,7 @@
     "tournament": "Liga 1, Clausura",
     "minute": null,
     "timestamp": 1754352000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1210,6 +1290,7 @@
     "tournament": "Superliga",
     "minute": null,
     "timestamp": 1754235000,
+    "currentPeriodStartTimestamp": 1754238968,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1225,6 +1306,7 @@
     "tournament": "Superliga",
     "minute": null,
     "timestamp": 1754245800,
+    "currentPeriodStartTimestamp": 1754249987,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1240,6 +1322,7 @@
     "tournament": "Superliga",
     "minute": null,
     "timestamp": 1754323200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1255,6 +1338,7 @@
     "tournament": "Superliga",
     "minute": null,
     "timestamp": 1754332200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1270,6 +1354,7 @@
     "tournament": "Allsvenskan",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754226401,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1285,6 +1370,7 @@
     "tournament": "Allsvenskan",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754226183,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1300,6 +1386,7 @@
     "tournament": "Allsvenskan",
     "minute": null,
     "timestamp": 1754231400,
+    "currentPeriodStartTimestamp": 1754235303,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1315,6 +1402,7 @@
     "tournament": "Allsvenskan",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1330,6 +1418,7 @@
     "tournament": "Swiss Super League",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754226202,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1345,6 +1434,7 @@
     "tournament": "Swiss Super League",
     "minute": null,
     "timestamp": 1754231400,
+    "currentPeriodStartTimestamp": 1754235266,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1360,6 +1450,7 @@
     "tournament": "Swiss Super League",
     "minute": null,
     "timestamp": 1754231400,
+    "currentPeriodStartTimestamp": 1754235392,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1375,6 +1466,7 @@
     "tournament": "Canadian Premier League",
     "minute": null,
     "timestamp": 1754251200,
+    "currentPeriodStartTimestamp": 1754255793,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1390,6 +1482,7 @@
     "tournament": "Canadian Premier League",
     "minute": null,
     "timestamp": 1754334000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1405,6 +1498,7 @@
     "tournament": "Canadian Premier League",
     "minute": null,
     "timestamp": 1754344800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1420,6 +1514,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754217000,
+    "currentPeriodStartTimestamp": 1754221376,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1435,6 +1530,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754225100,
+    "currentPeriodStartTimestamp": null,
     "statusType": "canceled",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1450,6 +1546,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754225100,
+    "currentPeriodStartTimestamp": 1754229387,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1465,6 +1562,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754237051,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1480,6 +1578,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754242200,
+    "currentPeriodStartTimestamp": 1754246369,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1495,6 +1594,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1510,6 +1610,7 @@
     "tournament": "NWSL",
     "minute": null,
     "timestamp": 1754238600,
+    "currentPeriodStartTimestamp": 1754243744,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1525,6 +1626,7 @@
     "tournament": "NWSL",
     "minute": null,
     "timestamp": 1754258400,
+    "currentPeriodStartTimestamp": 1754265548,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1540,6 +1642,7 @@
     "tournament": "NB I",
     "minute": null,
     "timestamp": 1754235900,
+    "currentPeriodStartTimestamp": 1754239834,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1555,6 +1658,7 @@
     "tournament": "NB I",
     "minute": null,
     "timestamp": 1754235900,
+    "currentPeriodStartTimestamp": 1754239678,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1570,6 +1674,7 @@
     "tournament": "NB I",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754248060,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1585,6 +1690,7 @@
     "tournament": "Niké Liga",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754236983,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1600,6 +1706,7 @@
     "tournament": "Niké Liga",
     "minute": null,
     "timestamp": 1754240400,
+    "currentPeriodStartTimestamp": null,
     "statusType": "postponed",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1615,6 +1722,7 @@
     "tournament": "Niké Liga",
     "minute": null,
     "timestamp": 1754240400,
+    "currentPeriodStartTimestamp": 1754244145,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1630,6 +1738,7 @@
     "tournament": "African Nations Championship, Group A",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754226505,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1645,6 +1754,7 @@
     "tournament": "African Nations Championship, Group A",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754237285,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1660,6 +1770,7 @@
     "tournament": "African Nations Championship, Group B",
     "minute": null,
     "timestamp": 1754240400,
+    "currentPeriodStartTimestamp": 1754244234,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1675,6 +1786,7 @@
     "tournament": "African Nations Championship, Group C",
     "minute": null,
     "timestamp": 1754316000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1690,6 +1802,7 @@
     "tournament": "African Nations Championship, Group C",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1705,6 +1818,7 @@
     "tournament": "Copa Argentina",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754251388,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1720,6 +1834,7 @@
     "tournament": "Primera Nacional, Group A",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754251104,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1735,6 +1850,7 @@
     "tournament": "Primera Nacional, Group A",
     "minute": null,
     "timestamp": 1754245800,
+    "currentPeriodStartTimestamp": 1754252891,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1750,6 +1866,7 @@
     "tournament": "Primera Nacional, Group A",
     "minute": null,
     "timestamp": 1754245800,
+    "currentPeriodStartTimestamp": 1754252699,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1765,6 +1882,7 @@
     "tournament": "Primera Nacional, Group A",
     "minute": null,
     "timestamp": 1754262900,
+    "currentPeriodStartTimestamp": 1754270215,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1780,6 +1898,7 @@
     "tournament": "Primera Nacional, Group B",
     "minute": null,
     "timestamp": 1754239500,
+    "currentPeriodStartTimestamp": 1754246857,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1795,6 +1914,7 @@
     "tournament": "Primera Nacional, Group B",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754251407,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1810,6 +1930,7 @@
     "tournament": "Primera Nacional, Group B",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754251118,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1825,6 +1946,7 @@
     "tournament": "Primera Nacional, Group B",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754250950,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1840,6 +1962,7 @@
     "tournament": "Primera Nacional, Group B",
     "minute": null,
     "timestamp": 1754245800,
+    "currentPeriodStartTimestamp": 1754253318,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1855,6 +1978,7 @@
     "tournament": "Primera Nacional, Group B",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754254289,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1870,6 +1994,7 @@
     "tournament": "Primera Nacional, Group B",
     "minute": null,
     "timestamp": 1754251200,
+    "currentPeriodStartTimestamp": 1754255280,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1885,6 +2010,7 @@
     "tournament": "Primera Nacional, Group B",
     "minute": null,
     "timestamp": 1754255700,
+    "currentPeriodStartTimestamp": 1754262883,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1900,6 +2026,7 @@
     "tournament": "Primera Nacional, Group B",
     "minute": null,
     "timestamp": 1754352600,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1915,6 +2042,7 @@
     "tournament": "Vysshaya League",
     "minute": null,
     "timestamp": 1754218800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "postponed",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1930,6 +2058,7 @@
     "tournament": "Vysshaya League",
     "minute": null,
     "timestamp": 1754226000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "postponed",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1945,6 +2074,7 @@
     "tournament": "Vysshaya League",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "postponed",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1960,6 +2090,7 @@
     "tournament": "Vysshaya League",
     "minute": null,
     "timestamp": 1754240400,
+    "currentPeriodStartTimestamp": 1754247093,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1975,6 +2106,7 @@
     "tournament": "WWIN Liga BiH",
     "minute": null,
     "timestamp": 1754239500,
+    "currentPeriodStartTimestamp": 1754246260,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -1990,6 +2122,7 @@
     "tournament": "WWIN Liga BiH",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754254498,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2005,6 +2138,7 @@
     "tournament": "WWIN Liga BiH",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754254380,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2020,6 +2154,7 @@
     "tournament": "Brasileirão Série C",
     "minute": null,
     "timestamp": 1754249400,
+    "currentPeriodStartTimestamp": 1754256690,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2035,6 +2170,7 @@
     "tournament": "Brasileirão Série C",
     "minute": null,
     "timestamp": 1754249400,
+    "currentPeriodStartTimestamp": 1754256419,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2050,6 +2186,7 @@
     "tournament": "Brasileirão Série C",
     "minute": null,
     "timestamp": 1754258400,
+    "currentPeriodStartTimestamp": 1754265539,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2065,6 +2202,7 @@
     "tournament": "Brasileirão Série C",
     "minute": null,
     "timestamp": 1754258400,
+    "currentPeriodStartTimestamp": 1754265289,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2080,6 +2218,7 @@
     "tournament": "Brasileirão Série C",
     "minute": null,
     "timestamp": 1754334000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2095,6 +2234,7 @@
     "tournament": "Brasileirão Série C",
     "minute": null,
     "timestamp": 1754346600,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2110,6 +2250,7 @@
     "tournament": "Brasileirão Série C",
     "minute": null,
     "timestamp": 1754346600,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2125,6 +2266,7 @@
     "tournament": "Copa Paulista, Group 3",
     "minute": null,
     "timestamp": 1754229600,
+    "currentPeriodStartTimestamp": 1754233620,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2140,6 +2282,7 @@
     "tournament": "Copa Paulista, Group 3",
     "minute": null,
     "timestamp": 1754347500,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2155,6 +2298,7 @@
     "tournament": "Copa Paulista, Group 4",
     "minute": null,
     "timestamp": 1754226000,
+    "currentPeriodStartTimestamp": 1754230351,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2170,6 +2314,7 @@
     "tournament": "Copa Paulista, Group 4",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754248240,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2185,6 +2330,7 @@
     "tournament": "Parva Liga",
     "minute": null,
     "timestamp": 1754236800,
+    "currentPeriodStartTimestamp": 1754243506,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2200,6 +2346,7 @@
     "tournament": "Parva Liga",
     "minute": null,
     "timestamp": 1754244900,
+    "currentPeriodStartTimestamp": 1754251741,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2215,6 +2362,7 @@
     "tournament": "Parva Liga",
     "minute": null,
     "timestamp": 1754323200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2230,6 +2378,7 @@
     "tournament": "Parva Liga",
     "minute": null,
     "timestamp": 1754331300,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2245,6 +2394,7 @@
     "tournament": "Liga de Ascenso",
     "minute": null,
     "timestamp": 1754238600,
+    "currentPeriodStartTimestamp": 1754245742,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2260,6 +2410,7 @@
     "tournament": "Liga de Ascenso",
     "minute": null,
     "timestamp": 1754247600,
+    "currentPeriodStartTimestamp": 1754254788,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2275,7 +2426,8 @@
     "tournament": "Liga de Ascenso",
     "minute": null,
     "timestamp": 1754265600,
-    "statusType": "inprogress",
+    "currentPeriodStartTimestamp": 1754272669,
+    "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
   },
@@ -2290,6 +2442,7 @@
     "tournament": "Liga de Ascenso",
     "minute": null,
     "timestamp": 1754350200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2305,6 +2458,7 @@
     "tournament": "Chinese League 1",
     "minute": null,
     "timestamp": 1754218800,
+    "currentPeriodStartTimestamp": 1754225875,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2320,6 +2474,7 @@
     "tournament": "Chinese League 1",
     "minute": null,
     "timestamp": 1754220600,
+    "currentPeriodStartTimestamp": 1754227740,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2335,6 +2490,7 @@
     "tournament": "Chinese League 1",
     "minute": null,
     "timestamp": 1754220600,
+    "currentPeriodStartTimestamp": 1754227867,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2350,6 +2506,7 @@
     "tournament": "Primera B, Clausura",
     "minute": null,
     "timestamp": 1754253000,
+    "currentPeriodStartTimestamp": 1754259976,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2365,6 +2522,7 @@
     "tournament": "Primera B, Clausura",
     "minute": null,
     "timestamp": 1754254800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "postponed",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2380,6 +2538,7 @@
     "tournament": "Primera B, Clausura",
     "minute": null,
     "timestamp": 1754258400,
+    "currentPeriodStartTimestamp": 1754265252,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2395,6 +2554,7 @@
     "tournament": "Primera B, Clausura",
     "minute": null,
     "timestamp": 1754341200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2410,6 +2570,7 @@
     "tournament": "Primera B, Clausura",
     "minute": null,
     "timestamp": 1754348700,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2425,6 +2586,7 @@
     "tournament": "Primera B, Clausura",
     "minute": null,
     "timestamp": 1754356200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2440,6 +2602,7 @@
     "tournament": "Primera División, Apertura",
     "minute": null,
     "timestamp": 1754254800,
+    "currentPeriodStartTimestamp": 1754259131,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2450,12 +2613,13 @@
     "time": "02:00",
     "homeTeam": "LD Alajuelense",
     "awayTeam": "Guadalupe FC",
-    "score": "0 - 0",
+    "score": "1 - 0",
     "status": "02:00",
     "tournament": "Primera División, Apertura",
     "minute": null,
     "timestamp": 1754265600,
-    "statusType": "inprogress",
+    "currentPeriodStartTimestamp": 1754269603,
+    "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
   },
@@ -2470,6 +2634,7 @@
     "tournament": "FNL",
     "minute": null,
     "timestamp": 1754224200,
+    "currentPeriodStartTimestamp": 1754230865,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2485,6 +2650,7 @@
     "tournament": "FNL",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754239656,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2500,6 +2666,7 @@
     "tournament": "FNL",
     "minute": null,
     "timestamp": 1754236800,
+    "currentPeriodStartTimestamp": 1754243838,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2515,6 +2682,7 @@
     "tournament": "Betinia Liga",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2530,6 +2698,7 @@
     "tournament": "Premium Liiga",
     "minute": null,
     "timestamp": 1754229600,
+    "currentPeriodStartTimestamp": null,
     "statusType": "postponed",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2545,6 +2714,7 @@
     "tournament": "Premium Liiga",
     "minute": null,
     "timestamp": 1754229600,
+    "currentPeriodStartTimestamp": 1754233680,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2560,6 +2730,7 @@
     "tournament": "Premium Liiga",
     "minute": null,
     "timestamp": 1754236800,
+    "currentPeriodStartTimestamp": 1754240700,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2575,6 +2746,7 @@
     "tournament": "Veikkausliiga",
     "minute": null,
     "timestamp": 1754226000,
+    "currentPeriodStartTimestamp": 1754232808,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2590,6 +2762,7 @@
     "tournament": "Veikkausliiga",
     "minute": null,
     "timestamp": 1754319600,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2605,6 +2778,7 @@
     "tournament": "Veikkausliiga",
     "minute": null,
     "timestamp": 1754323200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2620,6 +2794,7 @@
     "tournament": "Erovnuli Liga",
     "minute": null,
     "timestamp": 1754236800,
+    "currentPeriodStartTimestamp": 1754243835,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2635,6 +2810,7 @@
     "tournament": "Erovnuli Liga",
     "minute": null,
     "timestamp": 1754240400,
+    "currentPeriodStartTimestamp": 1754247643,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2650,6 +2826,7 @@
     "tournament": "Erovnuli Liga",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2665,6 +2842,7 @@
     "tournament": "3. Liga",
     "minute": null,
     "timestamp": 1754220600,
+    "currentPeriodStartTimestamp": 1754227676,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2680,6 +2858,7 @@
     "tournament": "3. Liga",
     "minute": null,
     "timestamp": 1754231400,
+    "currentPeriodStartTimestamp": 1754238155,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2695,6 +2874,7 @@
     "tournament": "3. Liga",
     "minute": null,
     "timestamp": 1754242200,
+    "currentPeriodStartTimestamp": 1754249429,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2710,6 +2890,7 @@
     "tournament": "Regionalliga North",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754229375,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2725,6 +2906,7 @@
     "tournament": "Regionalliga North",
     "minute": null,
     "timestamp": 1754226000,
+    "currentPeriodStartTimestamp": 1754233096,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2740,6 +2922,7 @@
     "tournament": "Regionalliga Northeast",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754229316,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2755,6 +2938,7 @@
     "tournament": "Regionalliga Northeast",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754229286,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2770,6 +2954,7 @@
     "tournament": "Regionalliga West",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754229466,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2785,6 +2970,7 @@
     "tournament": "Regionalliga Southwest",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754229346,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2800,6 +2986,7 @@
     "tournament": "Liga Guate Banrural, Apertura",
     "minute": null,
     "timestamp": 1754240400,
+    "currentPeriodStartTimestamp": 1754244619,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2815,6 +3002,7 @@
     "tournament": "Liga Guate Banrural, Apertura",
     "minute": null,
     "timestamp": 1754254800,
+    "currentPeriodStartTimestamp": 1754259274,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2830,6 +3018,7 @@
     "tournament": "Liga Guate Banrural, Apertura",
     "minute": null,
     "timestamp": 1754262000,
+    "currentPeriodStartTimestamp": 1754270310,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2845,6 +3034,7 @@
     "tournament": "Efsta deild",
     "minute": null,
     "timestamp": 1754238600,
+    "currentPeriodStartTimestamp": 1754242418,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2860,6 +3050,7 @@
     "tournament": "Efsta deild",
     "minute": null,
     "timestamp": 1754240400,
+    "currentPeriodStartTimestamp": 1754244255,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2875,6 +3066,7 @@
     "tournament": "First Division",
     "minute": null,
     "timestamp": 1754323200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2890,6 +3082,7 @@
     "tournament": "First Division",
     "minute": null,
     "timestamp": 1754323200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2905,6 +3098,7 @@
     "tournament": "First Division",
     "minute": null,
     "timestamp": 1754323200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2920,6 +3114,7 @@
     "tournament": "First Division",
     "minute": null,
     "timestamp": 1754323200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2935,6 +3130,7 @@
     "tournament": "First Division",
     "minute": null,
     "timestamp": 1754323200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2950,6 +3146,7 @@
     "tournament": "J.League 2",
     "minute": null,
     "timestamp": 1754215200,
+    "currentPeriodStartTimestamp": 1754222276,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2965,6 +3162,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "postponed",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2980,6 +3178,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754236920,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -2995,6 +3194,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754237280,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3010,6 +3210,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754237040,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3025,6 +3226,7 @@
     "tournament": "Virsliga",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754240031,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3040,6 +3242,7 @@
     "tournament": "Virsliga",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754239850,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3055,6 +3258,7 @@
     "tournament": "Virsliga",
     "minute": null,
     "timestamp": 1754240400,
+    "currentPeriodStartTimestamp": 1754247221,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3070,6 +3274,7 @@
     "tournament": "A Lyga",
     "minute": null,
     "timestamp": 1754234700,
+    "currentPeriodStartTimestamp": 1754241784,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3085,6 +3290,7 @@
     "tournament": "A Lyga",
     "minute": null,
     "timestamp": 1754323200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3100,6 +3306,7 @@
     "tournament": "A Lyga",
     "minute": null,
     "timestamp": 1754325000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3115,6 +3322,7 @@
     "tournament": "A Lyga",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3130,6 +3338,7 @@
     "tournament": "Liga de Expansion MX, Apertura",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754248145,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3145,6 +3354,7 @@
     "tournament": "Liga de Expansion MX, Apertura",
     "minute": null,
     "timestamp": 1754262000,
+    "currentPeriodStartTimestamp": 1754268791,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3160,6 +3370,7 @@
     "tournament": "Super Liga",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754237097,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3175,6 +3386,7 @@
     "tournament": "Super Liga",
     "minute": null,
     "timestamp": 1754240400,
+    "currentPeriodStartTimestamp": 1754244389,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3190,6 +3402,7 @@
     "tournament": "Super Liga",
     "minute": null,
     "timestamp": 1754240400,
+    "currentPeriodStartTimestamp": 1754244311,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3205,6 +3418,7 @@
     "tournament": "Super Liga",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754247659,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3220,6 +3434,7 @@
     "tournament": "Johan Cruijff Schaal",
     "minute": null,
     "timestamp": 1754236800,
+    "currentPeriodStartTimestamp": 1754240597,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3235,6 +3450,7 @@
     "tournament": "Leagues Cup, Group Stage",
     "minute": null,
     "timestamp": 1754256600,
+    "currentPeriodStartTimestamp": 1754261393,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3245,12 +3461,13 @@
     "time": "01:50",
     "homeTeam": "CD Guadalajara",
     "awayTeam": "Charlotte FC",
-    "score": "2 - 1",
+    "score": "6 - 4",
     "status": "01:50",
     "tournament": "Leagues Cup, Group Stage",
     "minute": null,
     "timestamp": 1754265000,
-    "statusType": "inprogress",
+    "currentPeriodStartTimestamp": 1754269016,
+    "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
   },
@@ -3260,12 +3477,13 @@
     "time": "02:30",
     "homeTeam": "CF Monterrey",
     "awayTeam": "New York Red Bulls",
-    "score": "0 - 1",
+    "score": "6 - 4",
     "status": "02:30",
     "tournament": "Leagues Cup, Group Stage",
     "minute": null,
     "timestamp": 1754267400,
-    "statusType": "inprogress",
+    "currentPeriodStartTimestamp": 1754272766,
+    "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
   },
@@ -3275,12 +3493,13 @@
     "time": "03:30",
     "homeTeam": "Colorado Rapids",
     "awayTeam": "Club Tijuana",
-    "score": "- - -",
+    "score": "1 - 2",
     "status": "03:30",
     "tournament": "Leagues Cup, Group Stage",
     "minute": null,
     "timestamp": 1754271000,
-    "statusType": "notstarted",
+    "currentPeriodStartTimestamp": 1754275612,
+    "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
   },
@@ -3290,12 +3509,13 @@
     "time": "04:30",
     "homeTeam": "LA Galaxy",
     "awayTeam": "Cruz Azul",
-    "score": "- - -",
+    "score": "8 - 9",
     "status": "04:30",
     "tournament": "Leagues Cup, Group Stage",
     "minute": null,
     "timestamp": 1754274600,
-    "statusType": "notstarted",
+    "currentPeriodStartTimestamp": 1754279084,
+    "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
   },
@@ -3305,12 +3525,13 @@
     "time": "04:30",
     "homeTeam": "Seattle Sounders FC",
     "awayTeam": "Santos Laguna",
-    "score": "- - -",
+    "score": "2 - 1",
     "status": "04:30",
     "tournament": "Leagues Cup, Group Stage",
     "minute": null,
     "timestamp": 1754274600,
-    "statusType": "notstarted",
+    "currentPeriodStartTimestamp": 1754279276,
+    "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
   },
@@ -3325,6 +3546,7 @@
     "tournament": "2nd Division, Group 2",
     "minute": null,
     "timestamp": 1754215200,
+    "currentPeriodStartTimestamp": 1754219100,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3340,6 +3562,7 @@
     "tournament": "I liga",
     "minute": null,
     "timestamp": 1754224200,
+    "currentPeriodStartTimestamp": 1754230900,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3355,6 +3578,7 @@
     "tournament": "I liga",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754240071,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3370,6 +3594,7 @@
     "tournament": "I liga",
     "minute": null,
     "timestamp": 1754242200,
+    "currentPeriodStartTimestamp": 1754249235,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3385,6 +3610,7 @@
     "tournament": "I liga",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3400,6 +3626,7 @@
     "tournament": "First League",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754229401,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3415,6 +3642,7 @@
     "tournament": "First League",
     "minute": null,
     "timestamp": 1754236800,
+    "currentPeriodStartTimestamp": 1754240880,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3430,6 +3658,7 @@
     "tournament": "First League",
     "minute": null,
     "timestamp": 1754236800,
+    "currentPeriodStartTimestamp": 1754243582,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3445,6 +3674,7 @@
     "tournament": "First League",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3460,6 +3690,7 @@
     "tournament": "PrvaLiga",
     "minute": null,
     "timestamp": 1754235000,
+    "currentPeriodStartTimestamp": 1754241972,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3475,6 +3706,7 @@
     "tournament": "PrvaLiga",
     "minute": null,
     "timestamp": 1754244900,
+    "currentPeriodStartTimestamp": 1754251454,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3490,6 +3722,7 @@
     "tournament": "MTN 8",
     "minute": null,
     "timestamp": 1754226000,
+    "currentPeriodStartTimestamp": 1754234760,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3505,6 +3738,7 @@
     "tournament": "MTN 8",
     "minute": null,
     "timestamp": 1754236800,
+    "currentPeriodStartTimestamp": 1754240856,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3520,6 +3754,7 @@
     "tournament": "Superettan",
     "minute": null,
     "timestamp": 1754226000,
+    "currentPeriodStartTimestamp": 1754233160,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3535,6 +3770,7 @@
     "tournament": "Superettan",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3550,6 +3786,7 @@
     "tournament": "Ettan, Norra",
     "minute": null,
     "timestamp": 1754218800,
+    "currentPeriodStartTimestamp": 1754224695,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3565,6 +3802,7 @@
     "tournament": "Ettan, Norra",
     "minute": null,
     "timestamp": 1754226000,
+    "currentPeriodStartTimestamp": 1754230042,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3580,6 +3818,7 @@
     "tournament": "Ettan, Norra",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3595,6 +3834,7 @@
     "tournament": "Ettan, Sodra",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3610,6 +3850,7 @@
     "tournament": "Ettan, Sodra",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3625,6 +3866,7 @@
     "tournament": "Ettan, Sodra",
     "minute": null,
     "timestamp": 1754326800,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3640,6 +3882,7 @@
     "tournament": "Challenge League",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754226331,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3655,6 +3898,7 @@
     "tournament": "Challenge League",
     "minute": null,
     "timestamp": 1754231400,
+    "currentPeriodStartTimestamp": 1754235105,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3670,6 +3914,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754215200,
+    "currentPeriodStartTimestamp": 1754222407,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3685,6 +3930,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754224200,
+    "currentPeriodStartTimestamp": 1754231290,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3700,6 +3946,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": 1754240238,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3715,6 +3962,7 @@
     "tournament": "Premier League",
     "minute": null,
     "timestamp": 1754319600,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3730,6 +3978,7 @@
     "tournament": "Liga AUF Uruguaya, Clausura",
     "minute": null,
     "timestamp": 1754235000,
+    "currentPeriodStartTimestamp": 1754241728,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3745,6 +3994,7 @@
     "tournament": "Liga AUF Uruguaya, Clausura",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754250707,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3760,6 +4010,7 @@
     "tournament": "Liga AUF Uruguaya, Clausura",
     "minute": null,
     "timestamp": 1754253000,
+    "currentPeriodStartTimestamp": 1754259952,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3775,6 +4026,7 @@
     "tournament": "Primera Division, Clausura",
     "minute": null,
     "timestamp": 1754254800,
+    "currentPeriodStartTimestamp": 1754258700,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3790,6 +4042,7 @@
     "tournament": "Primera Division, Clausura",
     "minute": null,
     "timestamp": 1754263800,
+    "currentPeriodStartTimestamp": 1754267828,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3805,6 +4058,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754215200,
+    "currentPeriodStartTimestamp": 1754219398,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3820,6 +4074,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754218800,
+    "currentPeriodStartTimestamp": 1754223386,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3835,6 +4090,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754218800,
+    "currentPeriodStartTimestamp": 1754223000,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3850,6 +4106,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754222400,
+    "currentPeriodStartTimestamp": 1754226337,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3865,6 +4122,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754226000,
+    "currentPeriodStartTimestamp": 1754229898,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3880,6 +4138,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754226000,
+    "currentPeriodStartTimestamp": 1754230867,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3895,6 +4154,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754229600,
+    "currentPeriodStartTimestamp": 1754233462,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3910,6 +4170,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754233200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "canceled",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3925,6 +4186,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754235000,
+    "currentPeriodStartTimestamp": 1754238802,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3940,6 +4202,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754235000,
+    "currentPeriodStartTimestamp": 1754238351,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3955,6 +4218,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754240400,
+    "currentPeriodStartTimestamp": 1754244231,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3970,6 +4234,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754250825,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -3985,6 +4250,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754248221,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -4000,6 +4266,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754244000,
+    "currentPeriodStartTimestamp": 1754247929,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -4015,6 +4282,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754254800,
+    "currentPeriodStartTimestamp": 1754261591,
     "statusType": "finished",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -4030,6 +4298,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754305200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -4045,6 +4314,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754323200,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -4060,6 +4330,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754334000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -4075,6 +4346,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754334000,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"
@@ -4090,6 +4362,7 @@
     "tournament": "Club Friendly Games",
     "minute": null,
     "timestamp": 1754384400,
+    "currentPeriodStartTimestamp": null,
     "statusType": "notstarted",
     "homeColor": "#374df5",
     "awayColor": "#374df5"

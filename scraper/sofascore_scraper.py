@@ -1,12 +1,13 @@
-# scraper/sofascore_scraper.py
-import json
 import time
 from datetime import datetime
-from supabase_client import supabase
 import uuid
+import sys
+
+from supabase_client import supabase
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+
+sys.stdout.reconfigure(encoding='utf-8')
 
 # Selenium opcije (Brave headless)
 options = webdriver.ChromeOptions()
@@ -35,53 +36,73 @@ def fetch_data(endpoint):
 # --- Parsiranje utakmica ---
 def parse_matches(events, live=False):
     parsed = []
+    current_timestamp = int(time.time())
 
     for event in events:
-        timestamp = event["startTimestamp"]
-        formatted_time = datetime.fromtimestamp(timestamp).strftime("%H:%M")
-        formatted_date = datetime.fromtimestamp(timestamp).strftime("%d.%m.%Y")
+        try:
+            timestamp = event["startTimestamp"]
+            formatted_time = datetime.fromtimestamp(timestamp).strftime("%H:%M")
+            formatted_date = datetime.fromtimestamp(timestamp).strftime("%d.%m.%Y")
+            status_type = event["status"].get("type", "")
+            time_info = event.get("time", {})
 
-        status_type = event["status"].get("type", "")
-        minute = event.get("time", {}).get("current") or event.get("status", {}).get("minute")
+            raw_minute = None
+            if status_type == "inprogress":
+                cps = time_info.get("currentPeriodStartTimestamp")
+                if cps:
+                    raw_minute = (current_timestamp - cps) // 60 + 1
+                    if raw_minute >= 90:
+                        raw_minute = 90
+                    elif raw_minute >= 45 and event.get("lastPeriod") == "period1":
+                        raw_minute = 45
+                else:
+                    raw_minute = event.get("status", {}).get("minute")
+                    if isinstance(raw_minute, str) and raw_minute.isdigit():
+                        raw_minute = int(raw_minute)
+                    elif not isinstance(raw_minute, int):
+                        raw_minute = None
 
-
-
-        if live:
-            if status_type == "inprogress" and minute is not None:
-                status_display = f"{minute}'"
-            elif status_type == "halftime":
-                status_display = "HT"
-            elif status_type == "finished":
-                status_display = "FT"
-            elif status_type == "penalties":
-                status_display = "PEN"
+            # Prikaz statusa
+            if live:
+                if raw_minute is not None:
+                    status_display = f"{raw_minute}'"
+                elif status_type == "inprogress":
+                    status_display = "Live"
+                elif status_type == "halftime":
+                    status_display = "HT"
+                elif status_type == "finished":
+                    status_display = "FT"
+                elif status_type == "penalties":
+                    status_display = "PEN"
+                else:
+                    status_display = status_type.capitalize()
             else:
-                status_display = status_type.capitalize()
-        else:
-            status_display = formatted_time
+                status_display = formatted_time
 
-        parsed.append({
-            "id": event["id"],
-            "date": formatted_date,
-            "time": formatted_time,
-            "homeTeam": event["homeTeam"]["name"],
-            "awayTeam": event["awayTeam"]["name"],
-            "score": f"{event.get('homeScore', {}).get('current', '-')}" +
-                     " - " +
-                     f"{event.get('awayScore', {}).get('current', '-')}",
-            "status": status_display,
-            "tournament": event["tournament"]["name"],
-            "minute": minute,
-            "timestamp": timestamp,
-            "statusType": status_type,
-            "homeColor": event["homeTeam"].get("teamColors", {}).get("primary", "#222"),
-            "awayColor": event["awayTeam"].get("teamColors", {}).get("primary", "#222"),
-        })
+            parsed.append({
+                "id": event["id"],
+                "date": formatted_date,
+                "time": formatted_time,
+                "homeTeam": event["homeTeam"]["name"],
+                "awayTeam": event["awayTeam"]["name"],
+                "score": f"{event.get('homeScore', {}).get('current', '-')}" +
+                         " - " +
+                         f"{event.get('awayScore', {}).get('current', '-')}",
+                "status": status_display,
+                "tournament": event["tournament"]["name"],
+                "minute": raw_minute,
+                "timestamp": timestamp,
+                "currentPeriodStartTimestamp": event.get("time", {}).get("currentPeriodStartTimestamp"),
+                "statusType": status_type,
+                "homeColor": event["homeTeam"].get("teamColors", {}).get("primary", "#222"),
+                "awayColor": event["awayTeam"].get("teamColors", {}).get("primary", "#222"),
+            })
+        except Exception as e:
+            print(f"[WARN] Parsiranje greška za event: {e}")
 
     return parsed
 
-
-# --- Parsiranje rezultata u brojke ---
+# --- Parsiranje rezultata ---
 def parse_score(score_str):
     if not score_str or " - " not in score_str:
         return None, None
@@ -90,7 +111,7 @@ def parse_score(score_str):
     except:
         return None, None
 
-# --- Slanje utakmica u Supabase ---
+# --- Slanje u Supabase ---
 def store_matches(matches):
     for match in matches:
         home_score, away_score = parse_score(match["score"])
@@ -106,7 +127,7 @@ def store_matches(matches):
                 "upcoming" if match["statusType"] == "notstarted" else "finished"
             ),
             "competition": match["tournament"],
-            "minute": match.get("minute"),
+            "minute": match["minute"] if isinstance(match["minute"], int) else None,
             "status_type": match["statusType"],
             "home_color": match.get("homeColor"),
             "away_color": match.get("awayColor"),
@@ -120,30 +141,23 @@ def store_matches(matches):
             print(f"[ERROR] Greška pri spremanju {data['id']}: {e}")
 
 # --- Glavni scraper flow ---
-try:
-    # 1. Live utakmice
-    live_data = fetch_data("events/live")
-    print(json.dumps(live_data, indent=2, ensure_ascii=False).encode('utf-8').decode('utf-8'))
+if __name__ == "__main__":
+    try:
+        # Live utakmice
+        live_data = fetch_data("events/live")
+        live_matches = parse_matches(live_data.get("events", []), live=True)
 
-    live_matches = parse_matches(live_data.get("events", []), live=True)
-    with open("public/liveMatches.json", "w", encoding="utf-8") as f:
-        json.dump(live_matches, f, indent=2, ensure_ascii=False)
-    print(f"[OK] Live: {len(live_matches)} utakmica")
+        # Današnje zakazane utakmice
+        today = datetime.now().strftime("%Y-%m-%d")
+        scheduled_data = fetch_data(f"scheduled-events/{today}")
+        scheduled_matches = parse_matches(scheduled_data.get("events", []), live=False)
 
-    # 2. Zakazane utakmice za danas
-    today = datetime.now().strftime("%Y-%m-%d")
-    scheduled_data = fetch_data(f"scheduled-events/{today}")
-    scheduled_matches = parse_matches(scheduled_data.get("events", []), live=False)
-    with open("public/scheduledMatches.json", "w", encoding="utf-8") as f:
-        json.dump(scheduled_matches, f, indent=2, ensure_ascii=False)
-    print(f"[OK] Zakazane: {len(scheduled_matches)} utakmica")
+        # Spremi
+        store_matches(live_matches + scheduled_matches)
+        print("[OK] Svi podaci poslani u Supabase.")
 
-    # 3. Spremi u Supabase
-    store_matches(live_matches + scheduled_matches)
-    print("[OK] Svi podaci poslani u Supabase.")
+    except Exception as e:
+        print(f"[ERROR] Glavna greška: {e}")
 
-except Exception as e:
-    print("[ERROR] Greška:", e)
-
-finally:
-    driver.quit()
+    finally:
+        driver.quit()
