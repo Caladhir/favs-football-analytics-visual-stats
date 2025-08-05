@@ -1,3 +1,5 @@
+@import "react-day-picker/dist/style.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -13,7 +15,7 @@
     --popover: var(--background);
     --popover-foreground: var(--foreground);
 
-    --primary: 0 72.2% 50.6%; /* čista crvena */
+    --primary: 0 72.2% 50.6%;
     --primary-foreground: 0 85.7% 97.3%;
 
     --secondary: 240 4.8% 95.9%;
@@ -22,8 +24,8 @@
     --muted: 240 4.8% 92%;
     --muted-foreground: 240 3.8% 46.1%;
 
-    --accent: 10 80% 90%; /* svjetlija crveno-narančasta */
-    --accent-foreground: 10 90% 30%; /* tamno crvena/narančasta za tekst */
+    --accent: 10 80% 90%;
+    --accent-foreground: 10 90% 30%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
@@ -33,6 +35,8 @@
     --ring: 240 5.9% 10%;
 
     --radius: 0.5rem;
+
+    --rdp-accent-color: #dc2626 !important;
   }
 
   .dark {
@@ -54,7 +58,7 @@
     --muted: 350 10% 18%;
     --muted-foreground: 0 0% 80%;
 
-    --accent: 0 65% 35%; /* tamnocrveni naglasak */
+    --accent: 0 65% 35%;
     --accent-foreground: 0 0% 98%;
 
     --destructive: 0 62.8% 30.6%;
@@ -77,4 +81,24 @@
   body {
     @apply bg-[hsl(var(--background))] text-[hsl(var(--foreground))];
   }
+}
+
+/* Selektirani dan  */
+.rdp-day_selected {
+  background-color: #dc2626 !important;
+  color: white !important;
+  border: transparent !important;
+  border-radius: 50% !important;
+}
+
+/*  Danas */
+.rdp-day_today {
+  color: #dc2626 !important;
+  background-color: #352d2f !important;
+  border: transparent !important;
+  border-radius: 50% !important;
+  font-weight: bold !important;
+}
+.rdp-chevron {
+  fill: #dc2626 !important; /* crveno */
 }

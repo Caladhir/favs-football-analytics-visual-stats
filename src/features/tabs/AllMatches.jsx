@@ -1,6 +1,7 @@
+// src/features/tabs/AllMatches.jsx
 import { useState } from "react";
 import useMatchesByDate from "../../hooks/useMatchesByDate";
-import DateSelector from "./DateSelector";
+import CalendarPopover from "./CalendarPopover";
 import { Link } from "react-router-dom";
 
 export default function AllMatches() {
@@ -9,7 +10,9 @@ export default function AllMatches() {
 
   return (
     <div>
-      <DateSelector date={selectedDate} setDate={setSelectedDate} />
+      <div className="flex justify-center my-4 gap-4">
+        <CalendarPopover date={selectedDate} setDate={setSelectedDate} />
+      </div>
 
       {loading ? (
         <p className="text-center text-muted-foreground mt-6">Loading...</p>
