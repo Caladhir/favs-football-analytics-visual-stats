@@ -1,3 +1,4 @@
+# scraper/sofascore_scraper.py
 import time
 from datetime import datetime
 import uuid
@@ -9,7 +10,7 @@ from selenium.webdriver.chrome.service import Service
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-# Selenium opcije (Brave headless)
+# --- Brave headless opcije ---
 options = webdriver.ChromeOptions()
 options.binary_location = "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
 options.add_argument("--headless=new")
@@ -17,21 +18,28 @@ options.add_argument("--disable-gpu")
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
 
-driver = webdriver.Chrome(service=Service("scraper/drivers/chromedriver.exe"), options=options)
+# --- Factory za driver ---
+def get_driver():
+    return webdriver.Chrome(service=Service("scraper/drivers/chromedriver.exe"), options=options)
 
 # --- SofaScore API dohvat ---
 def fetch_data(endpoint):
-    script = f"""
-        return fetch("https://www.sofascore.com/api/v1/sport/football/{endpoint}", {{
-            headers: {{
-                "Accept": "application/json, text/plain, */*",
-                "Referer": "https://www.sofascore.com/"
-            }}
-        }}).then(res => res.json());
-    """
-    driver.get("https://www.sofascore.com/")
-    time.sleep(3)
-    return driver.execute_script(script)
+    driver = get_driver()
+    try:
+        driver.get("https://www.sofascore.com/")
+        time.sleep(3)
+
+        script = f"""
+            return fetch("https://www.sofascore.com/api/v1/sport/football/{endpoint}", {{
+                headers: {{
+                    "Accept": "application/json, text/plain, */*",
+                    "Referer": "https://www.sofascore.com/"
+                }}
+            }}).then(res => res.json());
+        """
+        return driver.execute_script(script)
+    finally:
+        driver.quit()
 
 # --- Parsiranje utakmica ---
 def parse_matches(events, live=False):
@@ -62,7 +70,6 @@ def parse_matches(events, live=False):
                     elif not isinstance(raw_minute, int):
                         raw_minute = None
 
-            # Prikaz statusa
             if live:
                 if raw_minute is not None:
                     status_display = f"{raw_minute}'"
@@ -139,25 +146,3 @@ def store_matches(matches):
             print(f"[OK] Spremio: {data['id']}")
         except Exception as e:
             print(f"[ERROR] Greška pri spremanju {data['id']}: {e}")
-
-# --- Glavni scraper flow ---
-if __name__ == "__main__":
-    try:
-        # Live utakmice
-        live_data = fetch_data("events/live")
-        live_matches = parse_matches(live_data.get("events", []), live=True)
-
-        # Današnje zakazane utakmice
-        today = datetime.now().strftime("%Y-%m-%d")
-        scheduled_data = fetch_data(f"scheduled-events/{today}")
-        scheduled_matches = parse_matches(scheduled_data.get("events", []), live=False)
-
-        # Spremi
-        store_matches(live_matches + scheduled_matches)
-        print("[OK] Svi podaci poslani u Supabase.")
-
-    except Exception as e:
-        print(f"[ERROR] Glavna greška: {e}")
-
-    finally:
-        driver.quit()
