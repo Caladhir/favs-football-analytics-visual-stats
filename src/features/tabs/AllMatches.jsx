@@ -3,6 +3,7 @@ import { useState } from "react";
 import useMatchesByDate from "../../hooks/useMatchesByDate";
 import CalendarPopover from "./CalendarPopover";
 import { Link } from "react-router-dom";
+import { formatMatchTime } from "../../utils/formatMatchTime";
 
 export default function AllMatches() {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -24,38 +25,69 @@ export default function AllMatches() {
         <ul className="space-y-2 max-w-md mx-auto">
           {matches.map((match) => {
             const isLive = match.status_type === "inprogress";
-            const textStyle = isLive
-              ? "text-primary font-bold"
-              : "text-muted-foreground";
+            const isUpcoming = match.status_type === "notstarted";
+            const isFinished = match.status_type === "finished";
+
+            const { formattedDate, formattedTime } = formatMatchTime(
+              match.start_time
+            );
+
             const statusBadge = isLive
               ? "bg-destructive text-destructive-foreground"
-              : "bg-accent text-muted-foreground";
+              : isFinished
+              ? "bg-red-700 text-white"
+              : isUpcoming
+              ? "bg-yellow-600 text-white"
+              : "bg-muted text-muted-foreground";
+
+            const statusText =
+              match.minute !== null && match.minute !== undefined
+                ? `${match.minute}'`
+                : match.status;
+
+            const scoreText = `${match.home_score ?? "-"} - ${
+              match.away_score ?? "-"
+            }`;
 
             return (
               <li key={match.id} className="p-3 bg-muted rounded shadow">
                 <Link to={`/match/${match.id}`}>
-                  <p className={`text-center ${textStyle}`}>
-                    {match.start_time.slice(0, 10)} - {match.competition}
+                  <p className="text-sm text-center  mb-1">
+                    <span
+                      className={`text-sm text-center mb-1 ${
+                        isLive
+                          ? "text-primary font-semibold"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      {formattedDate} {formattedTime}{" "}
+                    </span>
+                    – {match.competition}
                   </p>
-                  <p className="text-center text-foreground">
+
+                  <p className="text-center text-foreground font-medium">
                     {match.home_team}
                     <span className="mx-1 text-accent">vs</span>
                     {match.away_team}
                   </p>
+
                   <div className="flex flex-col items-center justify-between mt-2 text-sm">
                     <span
                       className={`px-2 py-1 rounded font-semibold ${statusBadge}`}
                     >
-                      {match.minute !== null && match.minute !== undefined
-                        ? `${match.minute}'`
-                        : match.status}
+                      {statusText.charAt(0).toUpperCase() + statusText.slice(1)}
                     </span>
+
                     <span
                       className={`font-bold ${
-                        isLive ? "text-primary" : "text-muted-foreground"
+                        isLive
+                          ? "text-primary"
+                          : isFinished
+                          ? "bg-muted text-[hsl(var(--muted-foreground))]"
+                          : "bg-accent text-accent-foreground"
                       }`}
                     >
-                      {match.home_score} - {match.away_score}
+                      {scoreText}
                     </span>
                   </div>
                 </Link>

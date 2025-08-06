@@ -1,8 +1,6 @@
-#scraper/sofascore_scraper.py
 import time
-import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone,timedelta   
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from supabase_client import supabase
@@ -12,12 +10,10 @@ from utils import (
     upsert_lineup,
     upsert_player_stats,
     upsert_formation,
-    upsert_manager
+    upsert_manager,
 )
 
-sys.stdout.reconfigure(encoding='utf-8')
-
-# Setup Selenium
+# Setup Brave headless browser
 options = webdriver.ChromeOptions()
 options.binary_location = "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
 options.add_argument("--headless=new")
@@ -26,6 +22,7 @@ options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
 
 driver = webdriver.Chrome(service=Service("scraper/drivers/chromedriver.exe"), options=options)
+
 
 def fetch_data(endpoint):
     script = f"""
@@ -37,104 +34,74 @@ def fetch_data(endpoint):
         }}).then(res => res.json());
     """
     driver.get("https://www.sofascore.com/")
-    time.sleep(3)
+    time.sleep(2)
     return driver.execute_script(script)
 
-def parse_matches(events, live=False):
-    parsed = []
-    current_timestamp = int(time.time())
 
+def fetch_event_data(match_id):
+    return fetch_data(f"event/{match_id}/json")
+
+
+def map_status_type(status_type: str) -> str:
+    return {
+        "inprogress": "live",
+        "notstarted": "upcoming",
+        "finished": "finished",
+        "afterextra": "finished",
+        "penalties": "finished",
+    }.get(status_type, "upcoming")
+
+
+def parse_matches(events):
+    parsed = []
     for event in events:
         try:
             timestamp = event["startTimestamp"]
             status_type = event["status"].get("type", "")
-            time_info = event.get("time", {})
-
-            raw_minute = None
-            if status_type == "inprogress":
-                cps = time_info.get("currentPeriodStartTimestamp")
-                if cps:
-                    raw_minute = (current_timestamp - cps) // 60 + 1
-                    raw_minute = min(raw_minute, 90)
-                    if raw_minute >= 45 and event.get("lastPeriod") == "period1":
-                        raw_minute = 45
-                else:
-                    raw_minute = event.get("status", {}).get("minute")
-                    if isinstance(raw_minute, str) and raw_minute.isdigit():
-                        raw_minute = int(raw_minute)
-                    elif not isinstance(raw_minute, int):
-                        raw_minute = None
-
-            if live:
-                if raw_minute is not None:
-                    status_display = f"{raw_minute}'"
-                elif status_type == "halftime":
-                    status_display = "HT"
-                elif status_type == "finished":
-                    status_display = "FT"
-                elif status_type == "penalties":
-                    status_display = "PEN"
-                else:
-                    status_display = "Live"
-            else:
-                status_display = datetime.fromtimestamp(timestamp).strftime("%H:%M")
+            minute = event.get("time", {}).get("current") or event.get("status", {}).get("minute")
 
             parsed.append({
                 "id": event["id"],
                 "homeTeam": event["homeTeam"]["name"],
                 "awayTeam": event["awayTeam"]["name"],
+                "homeId": event["homeTeam"]["id"],
+                "awayId": event["awayTeam"]["id"],
                 "score": f"{event.get('homeScore', {}).get('current', '-')}" +
                          " - " +
                          f"{event.get('awayScore', {}).get('current', '-')}",
                 "tournament": event["tournament"]["name"],
-                "minute": raw_minute,
+                "minute": minute,
                 "timestamp": timestamp,
-                "status": status_display,
-                "statusType": status_type,
-                "currentPeriodStartTimestamp": time_info.get("currentPeriodStartTimestamp"),
+                "status_type": status_type,
                 "homeColor": event["homeTeam"].get("teamColors", {}).get("primary", "#222"),
                 "awayColor": event["awayTeam"].get("teamColors", {}).get("primary", "#222"),
             })
         except Exception as e:
-            print(f"[WARN] Parsiranje greška za event: {e}")
+            print(f"[WARN] Event parse error: {e}")
     return parsed
 
+
 def parse_score(score_str):
-    if not score_str or " - " not in score_str:
-        return None, None
     try:
-        return [int(s.strip()) if s.strip().isdigit() else None for s in score_str.split(" - ")]
+        home, away = [int(s.strip()) if s.strip().isdigit() else None for s in score_str.split(" - ")]
+        return home, away
     except:
         return None, None
 
-def store_detailed_match_data(match, raw_event):
+
+def store_detailed_match_data(match_id, raw_event):
     try:
-        # Provjere prije nego što bilo što pokušaš
         if not raw_event:
-            print(f"[WARN] Preskačem match {match['id']} - prazni podaci.")
             return
 
-        if "homeTeam" not in raw_event or "awayTeam" not in raw_event:
-            print(f"[WARN] Preskačem match {match['id']} - nedostaje homeTeam/awayTeam.")
-            return
+        upsert_team(raw_event["homeTeam"])
+        upsert_team(raw_event["awayTeam"])
 
-        if "lineups" not in raw_event and "statistics" not in raw_event:
-            print(f"[WARN] Preskačem match {match['id']} - nema lineupova ni statistike.")
-            return
-
-        # --- Spremi timove ---
-        home_team = raw_event["homeTeam"]
-        away_team = raw_event["awayTeam"]
-        upsert_team(home_team)
-        upsert_team(away_team)
-
-        # --- Spremi managere ako postoje ---
         if "homeManager" in raw_event:
-            upsert_manager(raw_event["homeManager"], home_team["id"])
+            upsert_manager(raw_event["homeManager"], raw_event["homeTeam"]["id"])
         if "awayManager" in raw_event:
-            upsert_manager(raw_event["awayManager"], away_team["id"])
+            upsert_manager(raw_event["awayManager"], raw_event["awayTeam"]["id"])
 
-        # --- Spremi lineup i formaciju ---
         if "lineups" in raw_event:
             for side in ["home", "away"]:
                 team_data = raw_event["lineups"].get(side)
@@ -142,13 +109,11 @@ def store_detailed_match_data(match, raw_event):
                     team_id = team_data["team"]["id"]
                     for p in team_data["players"]:
                         player = p.get("player")
-                        if not player:
-                            continue
-                        upsert_player(player, team_id)
-                        upsert_lineup(match["id"], team_id, player, p)
-                    upsert_formation(match["id"], team_id, team_data.get("formation", "Unknown"))
+                        if player:
+                            upsert_player(player, team_id)
+                            upsert_lineup(match_id, team_id, player, p)
+                    upsert_formation(match_id, team_id, team_data.get("formation", "Unknown"))
 
-        # --- Spremi statistiku igrača ---
         if "statistics" in raw_event:
             for team_stats in raw_event["statistics"].get("players", []):
                 team_id = team_stats["team"]["id"]
@@ -157,17 +122,33 @@ def store_detailed_match_data(match, raw_event):
                     stats = pstat.get("statistics")
                     if player and stats:
                         upsert_player(player, team_id)
-                        upsert_player_stats(match["id"], team_id, player["id"], stats)
+                        upsert_player_stats(match_id, team_id, player["id"], stats)
 
-        print(f"[OK] Detaljno spremljeno za match {match['id']}")
-
+        print(f"[OK] Detailed data stored for match {match_id}")
     except Exception as e:
-        print(f"[ERROR] Detaljno spremanje za {match['id']}: {e}")
+        print(f"[ERROR] Detail storage failed for match {match_id}: {e}")
 
 
-def store_matches(matches, raw_events):
+def store_matches(matches):
     for match in matches:
+        event = fetch_event_data(match["id"])
+        raw_event = event.get("event", {})
+
+        # Update match fields from detailed event data
+        match["status_type"] = raw_event.get("status", {}).get("type", match["status_type"])
+        match["minute"] = raw_event.get("time", {}).get("current") or match["minute"]
+        match["score"] = f"{raw_event.get('homeScore', {}).get('current', '-')}" + \
+                         " - " + \
+                         f"{raw_event.get('awayScore', {}).get('current', '-')}"
         home_score, away_score = parse_score(match["score"])
+        current_period_start = raw_event.get("time", {}).get("currentPeriodStartTimestamp")
+
+        match_start = datetime.fromtimestamp(match["timestamp"], timezone.utc)
+        if map_status_type(match["status_type"]) in ("live", "upcoming"):
+            if datetime.now(timezone.utc) > match_start + timedelta(hours=3):
+                print(f"[INFO] Match {match['id']} is older than 3h, marking as finished")
+                match["status_type"] = "finished"
+
 
         data = {
             "id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f"sofa_{match['id']}")),
@@ -175,45 +156,48 @@ def store_matches(matches, raw_events):
             "away_team": match["awayTeam"],
             "home_score": home_score,
             "away_score": away_score,
-            "start_time": datetime.fromtimestamp(match["timestamp"]).isoformat(),
-            "status": "live" if match["statusType"] == "inprogress" else (
-                "upcoming" if match["statusType"] == "notstarted" else "finished"
-            ),
+            "start_time": datetime.fromtimestamp(match["timestamp"], timezone.utc).isoformat().replace("+00:00", "Z"),
+            "current_period_start": current_period_start,
+            "status": map_status_type(match["status_type"]),
+            "status_type": match["status_type"],
             "competition": match["tournament"],
             "minute": match["minute"] if isinstance(match["minute"], int) else None,
-            "status_type": match["statusType"],
             "home_color": match.get("homeColor"),
             "away_color": match.get("awayColor"),
-            "current_period_start": match.get("currentPeriodStartTimestamp"),
             "source": "sofascore"
         }
 
         try:
             supabase.table("matches").upsert(data, on_conflict=["id"]).execute()
-            print(f"[OK] Match spreman: {data['id']}")
+            print(f"[OK] Upsert match: {data['id']}")
         except Exception as e:
-            print(f"[ERROR] Greška spremanja {data['id']}: {e}")
+            print(f"[ERROR] Failed to upsert match {data['id']}: {e}")
 
-        raw_event = next((e for e in raw_events if e["id"] == match["id"]), None)
-        if raw_event:
-            store_detailed_match_data(data, raw_event)
+        store_detailed_match_data(data["id"], raw_event)
+
 
 if __name__ == "__main__":
     try:
-        print("[INFO] Učitavanje live i današnjih utakmica...")
+        print("[INFO] Starting live, today, and yesterday matches fetch...")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+
         live_data = fetch_data("events/live")
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        today_data = fetch_data(f"scheduled-events/{today_str}")
+        today_data = fetch_data(f"scheduled-events/{today}")
+        yesterday_data = fetch_data(f"scheduled-events/{yesterday}")
 
-        live_matches = parse_matches(live_data.get("events", []), live=True)
-        today_matches = parse_matches(today_data.get("events", []), live=False)
+        live_matches = parse_matches(live_data.get("events", []))
+        today_matches = parse_matches(today_data.get("events", []))
+        yesterday_matches = parse_matches(yesterday_data.get("events", []))
 
-        all_matches = live_matches + today_matches
-        all_events = live_data.get("events", []) + today_data.get("events", [])
+        all_matches = {
+            m["id"]: m
+            for m in live_matches + today_matches + yesterday_matches
+        }
 
-        store_matches(all_matches, all_events)
-        print("[OK] Sve spremljeno.")
+        store_matches(list(all_matches.values()))
+        print("[✅] Done.")
     except Exception as e:
-        print(f"[ERROR] Glavna greška: {e}")
+        print(f"[FATAL] Error in main: {e}")
     finally:
         driver.quit()

@@ -7,7 +7,7 @@ import Spinner from "./ui/Spinner";
 // Lazy load layout and pages
 const AppLayout = lazy(() => import("./ui/AppLayout"));
 const HomePage = lazy(() => import("./pages/app_layout/HomePage"));
-const MatchPage = lazy(() => import("./pages/app_layout/MatchPage"));
+const Matches = lazy(() => import("./pages/app_layout/Matches"));
 const PageNotFound = lazy(() => import("./pages/NotFound"));
 
 export default function App() {
@@ -19,7 +19,7 @@ export default function App() {
         <Routes>
           <Route element={<AppLayout />}>
             <Route path="/" index element={<HomePage />} />
-            <Route path="match/:id" element={<MatchPage />} />
+            <Route path="/matches" element={<Matches />} />
             <Route path="*" element={<PageNotFound />} />
           </Route>
         </Routes>
