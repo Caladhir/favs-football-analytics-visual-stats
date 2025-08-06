@@ -3,6 +3,9 @@ from supabase import create_client
 import os
 from dotenv import load_dotenv
 from pathlib import Path
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(dotenv_path=BASE_DIR / ".env.local")

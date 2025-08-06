@@ -1,5 +1,6 @@
 from sofascore_scraper import fetch_data, parse_matches, store_matches
 from datetime import datetime, timedelta
+from tqdm import tqdm
 
 # Definiraj koliko dana unazad i unaprijed želiš povući
 DAYS_BACK = 365 * 2   # zadnje 2 godine
@@ -10,7 +11,11 @@ def run_bulk_scrape():
     all_matches = []
     total_count = 0
 
-    for delta in range(-DAYS_BACK, DAYS_FORWARD + 1):
+    total_days = DAYS_BACK + DAYS_FORWARD + 1
+
+    print(f"[INFO] Ukupno dana za obradu: {total_days}")
+
+    for delta in tqdm(range(-DAYS_BACK, DAYS_FORWARD + 1), desc="Fetching days", unit="day"):
         date = (today + timedelta(days=delta)).strftime("%Y-%m-%d")
         try:
             print(f"[INFO] Fetching: {date}")
@@ -19,7 +24,7 @@ def run_bulk_scrape():
                 print(f"[WARN] No data returned for {date}")
                 continue
 
-            parsed = parse_matches(data.get("events", []), live=False)
+            parsed = parse_matches(data.get("events", []))  # live=False više nije potrebno
             match_count = len(parsed)
             total_count += match_count
 
