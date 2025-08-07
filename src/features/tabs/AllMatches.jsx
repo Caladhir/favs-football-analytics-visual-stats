@@ -40,10 +40,24 @@ export default function AllMatches() {
               ? "bg-yellow-600 text-white"
               : "bg-muted text-muted-foreground";
 
-            const statusText =
-              match.minute !== null && match.minute !== undefined
-                ? `${match.minute}'`
-                : match.status;
+            const showMinute =
+              match.minute !== null && match.minute !== undefined;
+            let statusText = "";
+
+            if (match.status === "ht") statusText = "HT";
+            else if (match.status === "afterextra") statusText = "ET";
+            else if (match.status === "penalties") statusText = "PEN";
+            else if (match.status === "cancelled") statusText = "Cancelled";
+            else if (match.status === "postponed") statusText = "Postponed";
+            else if (match.status === "abandoned") statusText = "Abandoned";
+            else if (match.status === "live") {
+              if (showMinute && match.minute >= 120) statusText = "120+'";
+              else if (showMinute) statusText = `${match.minute}'`;
+              else statusText = "Live";
+            } else if (match.status === "finished") statusText = "FT";
+            else
+              statusText =
+                match.status.charAt(0).toUpperCase() + match.status.slice(1);
 
             const scoreText = `${match.home_score ?? "-"} - ${
               match.away_score ?? "-"
@@ -79,12 +93,12 @@ export default function AllMatches() {
                     </span>
 
                     <span
-                      className={`font-bold ${
+                      className={`font-bold mt-1  ${
                         isLive
                           ? "text-primary"
                           : isFinished
                           ? "bg-muted text-[hsl(var(--muted-foreground))]"
-                          : "bg-accent text-accent-foreground"
+                          : "text-accent-foreground"
                       }`}
                     >
                       {scoreText}

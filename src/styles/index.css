@@ -76,6 +76,10 @@
     .dark .text-outline {
       -webkit-text-stroke: 0.25px white;
     }
+
+    .text-outline-red {
+      -webkit-text-stroke: 1px #dc2626;
+    }
   }
 
   body {

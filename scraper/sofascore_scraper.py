@@ -1,14 +1,11 @@
-# scraper/sofascore_scraper.py
 import time
 import uuid
-from datetime import datetime, timezone,timedelta
+from datetime import datetime, timezone, timedelta
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from supabase_client import supabase
 import os
 from tqdm import tqdm
-
-
 
 options = webdriver.ChromeOptions()
 options.binary_location = os.getenv("BRAVE_PATH", "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe")
@@ -18,7 +15,6 @@ options.add_argument("--no-sandbox")
 options.add_argument("--disable-software-rasterizer")
 options.add_argument("--disable-logging")
 options.add_argument("--disable-dev-shm-usage")
-
 
 driver = webdriver.Chrome(service=Service("scraper/drivers/chromedriver.exe"), options=options)
 
@@ -43,15 +39,17 @@ def parse_score(score):
         return None, None
 
 def map_status(status_type: str) -> str:
-    return {
-        "inprogress": "live",
-        "notstarted": "upcoming",
-        "finished": "finished",
-        "afterextra": "finished",
-        "penalties": "finished",
-    }.get(status_type, "upcoming")
-
-
+    if status_type == "halftime":
+        return "ht"
+    elif status_type == "inprogress":
+        return "live"
+    elif status_type in ["finished", "afterextra", "penalties"]:
+        return status_type  
+    elif status_type == "notstarted":
+        return "upcoming"
+    elif status_type in ["postponed", "cancelled", "abandoned"]:
+        return status_type.lower()
+    return "upcoming"
 
 def parse_matches(events):
     parsed = []
@@ -65,11 +63,26 @@ def parse_matches(events):
 
             start_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
             status_type = event.get("status", {}).get("type", "")
-            minute = event.get("time", {}).get("current") or event.get("status", {}).get("minute")
 
-            if not status_type or status_type == "notstarted":
+            # Fallback: Ako je event stariji od 3h a još je notstarted ili inprogress -> završen
+            if status_type in ["notstarted", "inprogress", ""]:
                 if now > start_time + timedelta(hours=3):
                     status_type = "finished"
+
+            period_start = event.get("time", {}).get("currentPeriodStartTimestamp")
+            period = event.get("time", {}).get("period", 0)
+
+            minute = None
+            if status_type == "inprogress" and period_start:
+                raw_minute = int((now.timestamp() - period_start) // 60)
+                if period == 2:
+                    minute = 45 + raw_minute
+                elif period == 3:
+                    minute = 90 + raw_minute
+                elif period == 4:
+                    minute = 105 + raw_minute
+                else:
+                    minute = raw_minute
 
             home_score = event.get("homeScore", {}).get("current", "-")
             away_score = event.get("awayScore", {}).get("current", "-")
@@ -92,14 +105,12 @@ def parse_matches(events):
             print(f"[WARN] Skipped event: {e}")
     return parsed
 
-
 def store_matches(matches):
     success_count = 0
     error_count = 0
 
     for match in tqdm(matches, desc="Upserting matches", unit="match"):
         home_score, away_score = parse_score(match["score"])
-
         data = {
             "id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f"sofa_{match['id']}")),
             "home_team": match["homeTeam"],
@@ -115,7 +126,6 @@ def store_matches(matches):
             "away_color": match.get("awayColor", "#222"),
             "source": "sofascore"
         }
-
         try:
             supabase.table("matches").upsert(data, on_conflict=["id"]).execute()
             success_count += 1
@@ -127,7 +137,6 @@ def store_matches(matches):
     print(f"[ERROR] Grešaka prilikom spremanja: {error_count}")
     print(" [DONE]Ukupno obrađeno:", success_count + error_count)
 
-
 if __name__ == "__main__":
     try:
         print("[INFO] Fetching matches...")
@@ -137,11 +146,30 @@ if __name__ == "__main__":
         print(f"[DEBUG] Found {len(live_data.get('events', []))} live matches.")
         print(f"[DEBUG] Found {len(scheduled_data.get('events', []))} scheduled matches.")
 
-        
-
         all_events = live_data.get("events", []) + scheduled_data.get("events", [])
         parsed = parse_matches(all_events)
         store_matches(parsed)
-        print("[INFO] Done.")
+
+        # --- UBACUJEMO ZOMBI KILLER LOGIKU ---
+        # 1. ID-evi svih trenutno live utakmica (koje je SofaScore prijavio)
+        live_event_ids = {str(uuid.uuid5(uuid.NAMESPACE_DNS, f"sofa_{e['id']}")) for e in live_data.get('events', [])}
+
+        # 2. Sve iz baze koje su još uvijek live
+        existing_live_matches = supabase.table("matches").select("id", "status", "start_time").eq("status", "live").execute()
+        now = datetime.now(timezone.utc)
+        for m in existing_live_matches.data:
+            if m["id"] not in live_event_ids:
+                # Ako nije više među live (znači završila/otkazana/izašla iz feeda)
+                # Ako je prošlo više od 3h od start_time, markiraj je finished
+                start_time = datetime.fromisoformat(m["start_time"].replace("Z", "+00:00"))
+                if now > start_time + timedelta(hours=3):
+                    update = {
+                        "id": m["id"],
+                        "status": "finished",
+                        "status_type": "finished",
+                        "minute": None
+                    }
+                    supabase.table("matches").upsert(update, on_conflict=["id"]).execute()
+                    print(f"[ZOMBIE] Forced finish for {m['id']} ({start_time})")
     finally:
         driver.quit()

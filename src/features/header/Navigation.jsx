@@ -20,7 +20,7 @@ export default function Navigation({ className = "" }) {
           to={item.path}
           className={({ isActive }) =>
             `flex items-center gap-2 transition-all duration-300 ease-in-out hover:text-primary ${
-              isActive ? "text-primary font-bold" : "text-muted-foreground"
+              isActive ? "text-primary  font-bold" : "text-muted-foreground"
             }`
           }
         >
