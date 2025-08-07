@@ -123,9 +123,9 @@ def store_matches(matches):
             error_count += 1
             print(f"[ERROR] Failed upsert: {e}")
 
-    print(f"\n✅ Uspješno spremljeno: {success_count}")
-    print(f"❌ Grešaka prilikom spremanja: {error_count}")
-    print("📦 Ukupno obrađeno:", success_count + error_count)
+    print(f"\n[OK] Uspješno spremljeno: {success_count}")
+    print(f"[ERROR] Grešaka prilikom spremanja: {error_count}")
+    print(" [DONE]Ukupno obrađeno:", success_count + error_count)
 
 
 if __name__ == "__main__":
