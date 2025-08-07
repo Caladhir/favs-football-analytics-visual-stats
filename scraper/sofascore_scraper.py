@@ -6,16 +6,8 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from supabase_client import supabase
 import os
+from tqdm import tqdm
 
-
-def map_status_type(status_type: str) -> str:
-    return {
-        "inprogress": "live",
-        "notstarted": "upcoming",
-        "finished": "finished",
-        "afterextra": "finished",
-        "penalties": "finished",
-    }.get(status_type, "upcoming")
 
 
 options = webdriver.ChromeOptions()
@@ -23,6 +15,10 @@ options.binary_location = os.getenv("BRAVE_PATH", "C:\\Program Files\\BraveSoftw
 options.add_argument("--headless=new")
 options.add_argument("--disable-gpu")
 options.add_argument("--no-sandbox")
+options.add_argument("--disable-software-rasterizer")
+options.add_argument("--disable-logging")
+options.add_argument("--disable-dev-shm-usage")
+
 
 driver = webdriver.Chrome(service=Service("scraper/drivers/chromedriver.exe"), options=options)
 
@@ -46,7 +42,7 @@ def parse_score(score):
     except:
         return None, None
 
-def map_status(status_type):
+def map_status(status_type: str) -> str:
     return {
         "inprogress": "live",
         "notstarted": "upcoming",
@@ -54,6 +50,7 @@ def map_status(status_type):
         "afterextra": "finished",
         "penalties": "finished",
     }.get(status_type, "upcoming")
+
 
 
 def parse_matches(events):
@@ -97,7 +94,10 @@ def parse_matches(events):
 
 
 def store_matches(matches):
-    for match in matches:
+    success_count = 0
+    error_count = 0
+
+    for match in tqdm(matches, desc="Upserting matches", unit="match"):
         home_score, away_score = parse_score(match["score"])
 
         data = {
@@ -107,7 +107,7 @@ def store_matches(matches):
             "home_score": home_score,
             "away_score": away_score,
             "start_time": datetime.fromtimestamp(match["timestamp"], timezone.utc).isoformat().replace("+00:00", "Z"),
-            "status": map_status_type(match["status_type"]),
+            "status": map_status(match["status_type"]),
             "status_type": match["status_type"],
             "competition": match["tournament"],
             "minute": match["minute"] if isinstance(match["minute"], int) else None,
@@ -118,9 +118,14 @@ def store_matches(matches):
 
         try:
             supabase.table("matches").upsert(data, on_conflict=["id"]).execute()
-            print(f"[OK] Upsert: {match['homeTeam']} vs {match['awayTeam']}")
+            success_count += 1
         except Exception as e:
+            error_count += 1
             print(f"[ERROR] Failed upsert: {e}")
+
+    print(f"\n✅ Uspješno spremljeno: {success_count}")
+    print(f"❌ Grešaka prilikom spremanja: {error_count}")
+    print("📦 Ukupno obrađeno:", success_count + error_count)
 
 
 if __name__ == "__main__":
