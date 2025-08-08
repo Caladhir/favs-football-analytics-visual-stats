@@ -1,13 +1,7 @@
-// src/features/header/Navigation.jsx
+// src/features/header/Navigation.jsx - AŽURIRANO
 import { NavLink } from "react-router-dom";
 import IconWithSkeleton from "./IconWithSkeleton";
-
-export const navLinks = [
-  { path: "/dashboard", label: "Dashboard", icon: "fluent-mdl2:dashboard-add" },
-  { path: "/matches", label: "Matches", icon: "ph:soccer-ball-bold" },
-  { path: "/teams", label: "Teams", icon: "mdi:shield-account" },
-  { path: "/players", label: "Players", icon: "game-icons:babyfoot-players" },
-];
+import { navLinks } from "../../utils/navLinks";
 
 export default function Navigation({ className = "" }) {
   return (
@@ -19,7 +13,7 @@ export default function Navigation({ className = "" }) {
           key={item.path}
           to={item.path}
           className={({ isActive }) =>
-            `flex items-center gap-2 transition-all duration-300 ease-in-out hover:text-primary ${
+            `flex items-center gap-2 hover:scale-[1.02] transition-all duration-300 ease-in-out hover:text-primary ${
               isActive ? "text-primary  font-bold" : "text-muted-foreground"
             }`
           }

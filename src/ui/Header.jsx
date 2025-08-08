@@ -36,7 +36,7 @@ export default function Header() {
           alt="FAVS Logo"
           className="h-10 w-10 rounded-full object-cover"
         />
-        <span className="text-2xl font-semibold hover:text-primary transition-all duration-300 ease-in-out ">
+        <span className="text-2xl font-semibold hover:text-primary hover:scale-[1.02] transition-all duration-300 ease-in-out ">
           FAVS
         </span>
       </div>

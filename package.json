@@ -7,7 +7,9 @@
     "dev": "concurrently \"vite\" \"python scraper/fetch_loop.py\"",
     "backend": "python scraper/fetch_loop.py",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "analyze": "vite-bundle-analyzer",
+    "inspect": "vite build --mode development && vite-plugin-inspect"
   },
   "dependencies": {
     "@iconify-icon/react": "^3.0.0",
@@ -28,6 +30,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
+    "@tanstack/react-query-devtools": "^5.84.2",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.0",
@@ -38,6 +41,8 @@
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.1",
     "vite": "^7.0.6",
-    "vite-plugin-eslint": "^1.8.1"
+    "vite-bundle-analyzer": "^1.2.0",
+    "vite-plugin-eslint": "^1.8.1",
+    "vite-plugin-inspect": "^11.3.2"
   }
 }

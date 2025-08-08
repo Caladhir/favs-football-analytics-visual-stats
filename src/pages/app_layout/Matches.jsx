@@ -18,7 +18,7 @@ export default function Matches() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <section className="text-center mt-4">
-        <h1 className="text-3xl font-bold text-primary text-outline">
+        <h1 className="text-4xl font-black text-primary text-outline">
           Matches
         </h1>
         <p className="text-muted-foreground mt-1 text-sm">
@@ -31,7 +31,7 @@ export default function Matches() {
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`px-4 py-2 rounded font-medium ${
+            className={`px-4 py-2 rounded font-medium hover:bg-primary/50 hover:scale-[1.02] transition-all duration-300 ease-in-out ${
               tab === key
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground"

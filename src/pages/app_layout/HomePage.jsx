@@ -13,7 +13,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-background text-foreground">
       {/* Hero sekcija */}
       <section className="text-center py-16 px-4">
-        <h1 className="text-4xl font-bold text-primary text-outline">
+        <h1 className="font-black text-5xl text-primary text-outline">
           F.A.V.S.
         </h1>
         <p className="text-muted-foreground mt-1 text-lg ">

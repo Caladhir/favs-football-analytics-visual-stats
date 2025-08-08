@@ -1,21 +1,50 @@
-// formatMatchTime.js
-export function formatMatchTime(utcString) {
-  const raw_date = new Date(utcString);
+// src/utils/formatMatchTime.js - ISPRAVKA ZA TIMEZONE
+export function formatMatchTime(startTime) {
+  if (!startTime) {
+    return {
+      formattedDate: "Unknown Date",
+      formattedTime: "Unknown Time",
+    };
+  }
 
-  const formatter = new Intl.DateTimeFormat("hr-HR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Europe/Zagreb", // 👈 Dodano eksplicitno
-  });
+  try {
+    // 🔧 POBOLJŠANO: Konvertuj UTC vrijeme u lokalno
+    const utcDate = new Date(startTime);
 
-  const formatted = formatter.format(raw_date); // npr. "06. 08. 2025. 10:00"
-  const [date, time] = formatted.split(", ");
+    // Provjeri da li je valid datum
+    if (isNaN(utcDate.getTime())) {
+      throw new Error("Invalid date");
+    }
 
-  return {
-    formattedDate: date,
-    formattedTime: time,
-  };
+    // Format datum u lokalnom vremenu
+    const formattedDate = utcDate.toLocaleDateString("hr-HR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+
+    // Format vrijeme u lokalnom vremenu (24-satni format)
+    const formattedTime = utcDate.toLocaleTimeString("hr-HR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false, // 24-satni format
+    });
+
+    return {
+      formattedDate,
+      formattedTime,
+    };
+  } catch (error) {
+    console.warn(
+      "Error formatting match time:",
+      error,
+      "startTime:",
+      startTime
+    );
+
+    return {
+      formattedDate: "Invalid Date",
+      formattedTime: "Invalid Time",
+    };
+  }
 }
