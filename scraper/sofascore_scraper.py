@@ -1,4 +1,4 @@
-# scraper/sofascore_scraper.py - POBOLJŠANA VERZIJA
+# scraper/sofascore_scraper.py - S POBOLJŠANIM PRIORITETIMA LIGA
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -23,6 +23,106 @@ driver = webdriver.Chrome(service=Service("scraper/drivers/chromedriver.exe"), o
 # ---- Competition cache ----
 competition_cache = {}
 
+# 🚀 NOVO: Liga prioriteti za sortiranje (sinhronizirano s frontend-om)
+LEAGUE_PRIORITIES = {
+    # UEFA natjecanja - najviši prioritet
+    'UEFA Champions League': 120,
+    'Champions League': 120,
+    'UEFA Europa League': 110,
+    'Europa League': 110,
+    'UEFA Conference League': 100,
+    'Conference League': 100,
+    'UEFA Nations League': 95,
+    'Nations League': 95,
+    
+    # Top 5 europskih liga
+    'Premier League': 90,
+    'English Premier League': 90,
+    'EPL': 90,
+    'La Liga': 85,
+    'LaLiga': 85,
+    'Serie A': 80,
+    'Bundesliga': 75,
+    'Ligue 1': 70,
+    
+    # Ostala važna natjecanja
+    'FIFA World Cup': 130,
+    'World Cup': 130,
+    'UEFA European Championship': 125,
+    'European Championship': 125,
+    'Euro 2024': 125,
+    'Copa America': 85,
+    'Africa Cup of Nations': 60,
+    
+    # Regionalne europske lige
+    'Eredivisie': 55,
+    'Primeira Liga': 50,
+    'Belgian Pro League': 45,
+    'Jupiler Pro League': 45,
+    'Scottish Premiership': 40,
+    'Austrian Bundesliga': 35,
+    'Swiss Super League': 32,
+    'Danish Superliga': 30,
+    'Norwegian Eliteserien': 28,
+    'Swedish Allsvenskan': 26,
+    
+    # Balkanske lige
+    'HNL': 25,  # Hrvatska
+    'Prva Liga Srbije': 22,
+    'SuperLiga': 22,
+    'Prva Liga BiH': 20,
+    'Liga 1': 18,  # Rumunjska
+    'Bulgarian First League': 16,
+    
+    # Ostale intercontinentalne lige
+    'MLS': 25,
+    'Major League Soccer': 25,
+    'J1 League': 24,
+    'K League 1': 22,
+    'A-League': 20,
+    'Brasileirão': 65,
+    'Serie A Brazil': 65,
+    'Argentine Primera División': 45,
+    
+    # Kup natjecanja (niži prioritet od liga)
+    'FA Cup': 35,
+    'Copa del Rey': 40,
+    'Coppa Italia': 38,
+    'DFB-Pokal': 36,
+    'Coupe de France': 34,
+}
+
+def get_league_priority(competition_name):
+    """🚀 NOVO: Dobiva prioritet lige (fuzzy matching)"""
+    if not competition_name:
+        return 10  # default priority
+    
+    normalized_name = competition_name.lower().strip()
+    
+    # Exact match
+    for league, priority in LEAGUE_PRIORITIES.items():
+        if normalized_name == league.lower():
+            return priority
+    
+    # Fuzzy matching
+    for league, priority in LEAGUE_PRIORITIES.items():
+        if league.lower() in normalized_name:
+            return priority
+    
+    # Posebni slučajevi
+    if 'champions' in normalized_name:
+        return 120
+    if 'europa' in normalized_name:
+        return 110
+    if 'premier' in normalized_name:
+        return 90
+    if 'bundesliga' in normalized_name:
+        return 75
+    if 'serie a' in normalized_name:
+        return 80
+    
+    return 10  # default
+
 def fetch_data(endpoint):
     """Fetch JSON data from SofaScore API"""
     script = f"""
@@ -38,12 +138,18 @@ def fetch_data(endpoint):
     return driver.execute_script(script)
 
 def get_or_create_competition(tournament_data):
-    """Get or create competition, return UUID"""
+    """🚀 POBOLJŠANO: Get or create competition with priority"""
     tournament_name = tournament_data.get("name", "Unknown")
     tournament_id = tournament_data.get("id")
     country = tournament_data.get("category", {}).get("name", "Unknown")
     logo_url = tournament_data.get("category", {}).get("flag", None)
-    priority = tournament_data.get("priority", 0)
+    
+    # 🚀 NOVO: Kalkuliraj prioritet na temelju naziva
+    calculated_priority = get_league_priority(tournament_name)
+    sofascore_priority = tournament_data.get("priority", 0)
+    
+    # Koristi veći prioritet
+    final_priority = max(calculated_priority, sofascore_priority)
 
     if not tournament_id:
         return None
@@ -54,9 +160,18 @@ def get_or_create_competition(tournament_data):
 
     # Check database
     try:
-        existing = supabase.table("competitions").select("id").eq("name", tournament_name).execute()
+        existing = supabase.table("competitions").select("id", "priority").eq("name", tournament_name).execute()
         if existing.data:
             comp_id = existing.data[0]["id"]
+            existing_priority = existing.data[0].get("priority", 0)
+            
+            # 🚀 NOVO: Ažuriraj prioritet ako je naš bolji
+            if final_priority > existing_priority:
+                supabase.table("competitions").update({
+                    "priority": final_priority
+                }).eq("id", comp_id).execute()
+                print(f"[PRIORITY] Updated {tournament_name}: {existing_priority} -> {final_priority}")
+            
             competition_cache[tournament_id] = comp_id
             return comp_id
     except Exception as e:
@@ -70,11 +185,11 @@ def get_or_create_competition(tournament_data):
             "name": tournament_name,
             "country": country,
             "logo_url": logo_url,
-            "priority": priority
+            "priority": final_priority  # 🚀 KORISTI KALKULIRANI PRIORITET
         }
         supabase.table("competitions").insert(comp_data).execute()
         competition_cache[tournament_id] = new_id
-        print(f"[INFO] Created competition: {tournament_name}")
+        print(f"[INFO] Created competition: {tournament_name} (priority: {final_priority})")
         return new_id
     except Exception as e:
         print(f"[ERROR] Failed to create competition {tournament_name}: {e}")
@@ -126,7 +241,6 @@ def calculate_minute(status_type, period_start, period, now, start_time):
         
     # Kalkuliraj minute od početka utakmice
     minutes_from_start = int((now.timestamp() - start_time.timestamp()) // 60)
-    print(f"[MINUTE DEBUG] Minutes from match start: {minutes_from_start}'")
     
     # Sigurnosna provjera
     if minutes_from_start < 0:
@@ -139,26 +253,22 @@ def calculate_minute(status_type, period_start, period, now, start_time):
     if minutes_from_start <= 45:
         # Prvi poluvrijeme (1-45')
         calculated = max(1, minutes_from_start)
-        print(f"[MINUTE] 1st half: {calculated}'")
         return calculated
         
     elif minutes_from_start <= 60:
         # Poluvrijeme pauza (45-60')
         if status_type == "halftime":
-            print(f"[MINUTE] Half-time break")
             return 45  # Pokaži 45' tijekom poluvremena
         else:
             # Možda dodatno vrijeme prvog poluvremena
             additional = min(minutes_from_start - 45, 5)  # Maksimalno +5 min
             calculated = 45 + additional
-            print(f"[MINUTE] 1st half additional: {calculated}'")
             return calculated
             
     elif minutes_from_start <= 105:
         # Drugi poluvrijeme (60-105' od početka = 46'-90' utakmice)
         second_half_minute = 45 + (minutes_from_start - 60)
         calculated = min(second_half_minute, 90)
-        print(f"[MINUTE] 2nd half: {calculated}'")
         return calculated
         
     else:
@@ -166,7 +276,6 @@ def calculate_minute(status_type, period_start, period, now, start_time):
         if minutes_from_start <= 120:
             overtime = 90 + (minutes_from_start - 105)
             calculated = min(overtime, 120)
-            print(f"[MINUTE] Extra time: {calculated}'")
             return calculated
         else:
             # Prekasno - vjerojatno treba završiti utakmicu
@@ -239,6 +348,9 @@ def parse_matches(events):
     parsed = []
     now = datetime.now(timezone.utc)
     
+    # 🚀 NOVO: Statistike za monitoring
+    league_stats = {}
+    
     for event in events:
         try:
             timestamp = event.get("startTimestamp")
@@ -264,9 +376,21 @@ def parse_matches(events):
             home_score = event.get("homeScore", {}).get("current")
             away_score = event.get("awayScore", {}).get("current")
             
-            # Get competition
+            # Get competition with priority
             tournament = event.get("tournament", {})
             competition_id = get_or_create_competition(tournament)
+            competition_name = tournament.get("name", "Unknown")
+            
+            # 🚀 NOVO: Prikupi statistike po ligama
+            if competition_name not in league_stats:
+                league_stats[competition_name] = {
+                    'total': 0,
+                    'live': 0,
+                    'priority': get_league_priority(competition_name)
+                }
+            league_stats[competition_name]['total'] += 1
+            if mapped_status in ['live', 'ht']:
+                league_stats[competition_name]['live'] += 1
             
             parsed.append({
                 "id": event["id"],
@@ -277,7 +401,7 @@ def parse_matches(events):
                 "start_time": timestamp,
                 "status_type": status_type,
                 "mapped_status": mapped_status,  # 🔧 DODANO za debugging
-                "competition": tournament.get("name", "Unknown"),
+                "competition": competition_name,
                 "competition_id": competition_id,
                 "season": tournament.get("season"),
                 "round": event.get("roundInfo", {}).get("name"),
@@ -286,11 +410,26 @@ def parse_matches(events):
                 "away_color": event["awayTeam"].get("teamColors", {}).get("primary", "#222"),
                 "current_period_start": period_start,
                 "venue": event.get("venue", {}).get("name"),
-                "source": "sofascore"
+                "source": "sofascore",
+                "league_priority": get_league_priority(competition_name)  # 🚀 NOVO
             })
             
         except Exception as e:
             print(f"[WARN] Skipped event: {e}")
+    
+    # 🚀 NOVO: Prikaži statistike po ligama
+    print(f"\n[LEAGUE STATS] Processed {len(parsed)} matches across {len(league_stats)} competitions:")
+    
+    # Sortiraj lige po prioritetu za prikaz
+    sorted_leagues = sorted(league_stats.items(), key=lambda x: x[1]['priority'], reverse=True)
+    
+    for league, stats in sorted_leagues[:15]:  # Top 15 liga
+        live_indicator = f"🔴 {stats['live']} live" if stats['live'] > 0 else ""
+        priority_indicator = "⭐" if stats['priority'] > 80 else ""
+        print(f"  {priority_indicator} {league} (P:{stats['priority']}): {stats['total']} matches {live_indicator}")
+    
+    if len(sorted_leagues) > 15:
+        print(f"  ... and {len(sorted_leagues) - 15} more leagues")
             
     return parsed
 
@@ -307,6 +446,7 @@ def debug_minute_calculations(parsed_matches):
         minutes_from_start = (now - start_time).total_seconds() / 60
         
         print(f"  {match['home_team']} vs {match['away_team']}")
+        print(f"    League: {match['competition']} (P:{match['league_priority']})")
         print(f"    Started: {start_time.strftime('%H:%M')} ({minutes_from_start:.0f}m ago)")
         print(f"    Status: {match['status_type']} -> {match['mapped_status']}")
         print(f"    Calculated minute: {match['minute']}'")
@@ -317,9 +457,10 @@ def debug_minute_calculations(parsed_matches):
 
 
 def store_matches(matches):
-    """Store matches to database with retry logic"""
+    """🚀 POBOLJŠANO: Store matches with priority and better error handling"""
     success_count = 0
     error_count = 0
+    league_counts = {}
     
     for match in tqdm(matches, desc="Storing matches"):
         data = {
@@ -341,17 +482,24 @@ def store_matches(matches):
             "away_color": match["away_color"],
             "current_period_start": match.get("current_period_start"),
             "source": "sofascore",
-            "updated_at": datetime.now(timezone.utc).isoformat()  # 🔧 DODANO tracking
+            "updated_at": datetime.now(timezone.utc).isoformat(),  # 🔧 DODANO tracking
+            "league_priority": match["league_priority"]  # 🚀 NOVO za backend sortiranje
         }
         
         # Remove None values
         data = {k: v for k, v in data.items() if v is not None}
+        
+        # 🚀 NOVO: Track liga statistike
+        league = match["competition"]
+        if league not in league_counts:
+            league_counts[league] = {"stored": 0, "failed": 0}
         
         # Retry logic
         for attempt in range(3):
             try:
                 supabase.table("matches").upsert(data, on_conflict=["id"]).execute()
                 success_count += 1
+                league_counts[league]["stored"] += 1
                 break
             except Exception as e:
                 print(f"[ERROR] Attempt {attempt+1} failed: {e}")
@@ -359,11 +507,23 @@ def store_matches(matches):
                     time.sleep(1)
         else:
             error_count += 1
+            league_counts[league]["failed"] += 1
             print(f"[ERROR] Failed to store match: {data['id']}")
     
-    print(f"[SUCCESS] Stored: {success_count}")
-    print(f"[ERROR] Failed: {error_count}")
-    print(f"[TOTAL] Processed: {success_count + error_count}")
+    print(f"\n[STORAGE] Results:")
+    print(f"  ✅ Stored: {success_count}")
+    print(f"  ❌ Failed: {error_count}")
+    print(f"  📊 Total: {success_count + error_count}")
+    
+    # 🚀 NOVO: Prikaži top lige po broju pohranjenih utakmica
+    top_leagues = sorted(league_counts.items(), 
+                        key=lambda x: x[1]["stored"], reverse=True)[:10]
+    
+    print(f"\n[TOP LEAGUES] Most matches stored:")
+    for league, counts in top_leagues:
+        priority = get_league_priority(league)
+        priority_star = "⭐" if priority > 80 else ""
+        print(f"  {priority_star} {league}: {counts['stored']} stored, {counts['failed']} failed")
 
 def cleanup_zombie_matches():
     """🔧 AGRESIVNIJI: Finish matches stuck in live/ht status"""
@@ -372,14 +532,20 @@ def cleanup_zombie_matches():
         cutoff_time = now - timedelta(hours=3)
         
         # Pronađi sve zombie utakmice
-        zombie_matches = supabase.table("matches").select("id", "start_time", "status", "home_team", "away_team").in_(
+        zombie_matches = supabase.table("matches").select("id", "start_time", "status", "home_team", "away_team", "competition").in_(
             "status", ["live", "ht"]
         ).lt("start_time", cutoff_time.isoformat()).execute()
         
         zombie_count = 0
+        zombie_leagues = {}
         
         for match in zombie_matches.data:
-            print(f"[ZOMBIE] {match['home_team']} vs {match['away_team']} - {match['start_time']}")
+            league = match.get('competition', 'Unknown')
+            if league not in zombie_leagues:
+                zombie_leagues[league] = 0
+            zombie_leagues[league] += 1
+            
+            print(f"[ZOMBIE] {match['home_team']} vs {match['away_team']} - {match['start_time']} ({league})")
             
             update_data = {
                 "id": match["id"],
@@ -393,7 +559,9 @@ def cleanup_zombie_matches():
             zombie_count += 1
         
         if zombie_count > 0:
-            print(f"[ZOMBIE] Cleaned {zombie_count} zombie matches")
+            print(f"[ZOMBIE] Cleaned {zombie_count} zombie matches across {len(zombie_leagues)} leagues")
+            for league, count in sorted(zombie_leagues.items(), key=lambda x: x[1], reverse=True):
+                print(f"  - {league}: {count} zombies")
         else:
             print("[ZOMBIE] No zombie matches found")
             
@@ -421,11 +589,42 @@ def force_cleanup_old_live_matches():
     except Exception as e:
         print(f"[ERROR] Force cleanup failed: {e}")
 
+def update_competition_priorities():
+    """🚀 NOVO: Batch update competition priorities in database"""
+    try:
+        print("[PRIORITY] Updating competition priorities...")
+        
+        # Dohvati sve postojeće natjecanja
+        competitions = supabase.table("competitions").select("id", "name", "priority").execute()
+        
+        updated_count = 0
+        for comp in competitions.data:
+            current_priority = comp.get("priority", 0)
+            calculated_priority = get_league_priority(comp["name"])
+            
+            # Ažuriraj ako je naš prioritet bolji
+            if calculated_priority > current_priority:
+                supabase.table("competitions").update({
+                    "priority": calculated_priority
+                }).eq("id", comp["id"]).execute()
+                
+                print(f"[PRIORITY] {comp['name']}: {current_priority} -> {calculated_priority}")
+                updated_count += 1
+        
+        print(f"[PRIORITY] Updated {updated_count} competition priorities")
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to update priorities: {e}")
+
 if __name__ == "__main__":
     start_time = time.time()
     
     try:
-        print("[INFO] Starting IMPROVED SofaScore scraper...")
+        print("[INFO] Starting IMPROVED SofaScore scraper with smart league priorities...")
+        
+        # 🚀 NOVO: Ažuriraj prioritete natjecanja
+        print("[INFO] Phase 0: Updating competition priorities...")
+        update_competition_priorities()
         
         # 🔧 PRVO: Očistiti sve zombie utakmice
         print("[INFO] Phase 1: Cleaning zombie matches...")
@@ -449,13 +648,14 @@ if __name__ == "__main__":
         finish_missing_live_matches(live_events, scheduled_events)
         
         # Process
-        print("[INFO] Phase 3: Processing and storing...")
+        print("[INFO] Phase 3: Processing and storing with priorities...")
         all_events = live_events + scheduled_events
         parsed_matches = parse_matches(all_events)
 
-        # 🔧 DODAJTE OVO:
+        # 🔧 Debug minute calculations
         debug_minute_calculations(parsed_matches)
 
+        # 🚀 Store with enhanced tracking
         store_matches(parsed_matches)
         
         # Final cleanup
@@ -463,7 +663,12 @@ if __name__ == "__main__":
         cleanup_zombie_matches()
         
         elapsed = time.time() - start_time
-        print(f"[SUCCESS] Completed in {elapsed:.2f}s")
+        print(f"\n[SUCCESS] 🚀 Scraper completed in {elapsed:.2f}s with smart league prioritization!")
+        
+        # 🚀 NOVO: Finalni izvještaj
+        print(f"[SUMMARY] Processed {len(parsed_matches)} matches from SofaScore")
+        print(f"[SUMMARY] Live matches: {len([m for m in parsed_matches if m['mapped_status'] in ['live', 'ht']])}")
+        print(f"[SUMMARY] Top league matches: {len([m for m in parsed_matches if m['league_priority'] > 80])}")
         
     except Exception as e:
         print(f"[CRITICAL] Scraper failed: {e}")

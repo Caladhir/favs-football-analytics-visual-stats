@@ -1,53 +1,47 @@
 // src/App.jsx
-import { Suspense, lazy } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
-import Spinner from "./ui/Spinner";
-import PerformanceMonitor from "./ui/PerformanceMonitor";
 
-// Lazy load layout and pages
-const AppLayout = lazy(() => import("./ui/AppLayout"));
-const HomePage = lazy(() => import("./pages/app_layout/HomePage"));
-const Matches = lazy(() => import("./pages/app_layout/Matches"));
-const LiveMatches = lazy(() => import("./features/tabs/LiveMatches"));
-const Dashboard = lazy(() => import("./pages/app_layout/Dashboard"));
-const PageNotFound = lazy(() => import("./pages/NotFound"));
+// Components
+import AppLayout from "./ui/AppLayout";
+import HomePage from "./pages/app_layout/HomePage";
+import Dashboard from "./pages/app_layout/Dashboard";
+import Matches from "./pages/app_layout/Matches";
+import MatchPage from "./pages/app_layout/MatchPage";
+import NotFound from "./pages/NotFound";
+import ScrollToTop from "./ui/ScrollToTop";
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Suspense
-        fallback={<Spinner size={48} className="fixed inset-0 m-auto" />}
-      >
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route path="/" index element={<HomePage />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/matches" element={<Matches />} />
-            <Route path="/matches/live" element={<LiveMatches />} />
-            <Route path="/matches/upcoming" element={<Matches />} />
-            <Route path="/matches/finished" element={<Matches />} />
-            <Route path="*" element={<PageNotFound />} />
-          </Route>
-        </Routes>
-      </Suspense>
+    <Router>
+      <div className="min-h-screen bg-background text-foreground">
+        <ScrollToTop />
 
-      <Toaster
-        position="bottom-right"
-        gutter={12}
-        containerStyle={{ margin: "8px" }}
-        toastOptions={{
-          style: {
-            background: "#121212",
-            color: "white",
-            border: "none",
-            boxShadow: "0 2px 12px rgba(0, 0, 0, 0.4)",
-          },
-          success: { duration: 3000 },
-          error: { duration: 5000 },
-        }}
-      />
-      <PerformanceMonitor />
-    </BrowserRouter>
+        <Routes>
+          <Route path="/" element={<AppLayout />}>
+            <Route index element={<HomePage />} />
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="matches/*" element={<Matches />} />
+            <Route path="match/:id" element={<MatchPage />} />
+          </Route>
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+
+        {/* Toast notifications */}
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            duration: 4000,
+            style: {
+              background: "hsl(var(--background))",
+              color: "hsl(var(--foreground))",
+              border: "1px solid hsl(var(--border))",
+            },
+          }}
+        />
+
+        {/* 🚀 PERFORMANCE DEBUGGER - samo u development */}
+      </div>
+    </Router>
   );
 }

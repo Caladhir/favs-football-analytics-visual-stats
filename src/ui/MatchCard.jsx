@@ -1,12 +1,18 @@
-// src/components/MatchCard.jsx - FIKSIRANA VERZIJA
+// src/components/MatchCard.jsx - OPTIMIZIRANA VERZIJA BEZ RESTART PROBLEMA
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { formatMatchTime } from "../utils/formatMatchTime";
 import {
   validateLiveStatus,
   calculateDisplayMinute,
+  calculateRealTimeMinute,
 } from "../utils/matchStatusUtils";
 
 export default function MatchCard({ match }) {
+  // Real-time state za live minute
+  const [displayMinute, setDisplayMinute] = useState(null);
+  const intervalRef = useRef(null);
+
   // Validacija statusa
   const validatedStatus = validateLiveStatus(match);
 
@@ -19,6 +25,96 @@ export default function MatchCard({ match }) {
   const isPostponed = validatedStatus === "postponed";
   const isAbandoned = validatedStatus === "abandoned";
   const isSuspended = validatedStatus === "suspended";
+
+  // Memoiziraj ključne podatke za optimizaciju
+  const matchData = useMemo(
+    () => ({
+      id: match.id,
+      start_time: match.start_time,
+      minute: match.minute,
+      status: match.status,
+      home_team: match.home_team,
+      away_team: match.away_team,
+    }),
+    [
+      match.id,
+      match.start_time,
+      match.minute,
+      match.status,
+      match.home_team,
+      match.away_team,
+    ]
+  );
+
+  // 🔧 OPTIMIZIRAN: Timer koji se ne restarta nepotrebno
+  useEffect(() => {
+    // Ukloni postojeći timer
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    // Ako nije live/ht, nema timera
+    if (!isLive && !isHalfTime) {
+      setDisplayMinute(null);
+      return;
+    }
+
+    // 🔧 PROVJERA: Je li utakmica prestar za timer?
+    const now = new Date();
+    const startTime = new Date(matchData.start_time);
+    const hoursElapsed = (now - startTime) / (1000 * 60 * 60);
+
+    if (hoursElapsed > 2.5) {
+      console.warn(
+        `⚠️ Match too old for timer: ${matchData.home_team} vs ${
+          matchData.away_team
+        } (${hoursElapsed.toFixed(1)}h)`
+      );
+      setDisplayMinute("LIVE");
+      return;
+    }
+
+    // Postavi početnu minutu
+    const initialMinute = calculateDisplayMinute(match, now);
+    setDisplayMinute(initialMinute);
+
+    // Pokreni timer
+    intervalRef.current = setInterval(() => {
+      const newTime = new Date();
+      const newMinute = calculateDisplayMinute(match, newTime);
+      setDisplayMinute(newMinute);
+    }, 1000);
+
+    // Log početka timera (samo jednom)
+    if (import.meta.env.DEV) {
+      console.log(
+        `⏱️ Timer started: ${matchData.home_team} vs ${matchData.away_team}`
+      );
+    }
+
+    // Cleanup funkcija
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+        if (import.meta.env.DEV) {
+          console.log(
+            `⏱️ Timer stopped: ${matchData.home_team} vs ${matchData.away_team}`
+          );
+        }
+      }
+    };
+  }, [matchData, isLive, isHalfTime, match]); // Dodao 'match' za ESLint
+
+  // Cleanup na unmount
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
 
   // Formatiranje vremena
   const { formattedDate, formattedTime } = formatMatchTime(match.start_time);
@@ -35,13 +131,27 @@ export default function MatchCard({ match }) {
     return "bg-muted text-muted-foreground";
   };
 
-  // 🔧 SIMPLIFIED: Status text generation - koristi samo calculateDisplayMinute
+  const getScoreStyle = () => {
+    if (isLive || isHalfTime) {
+      // Live utakmice - crveni rezultat s pulsiranjem
+      return "text-red-500 font-bold text-xl min-w-[2rem] text-center animate-pulse";
+    }
+
+    if (isFinished) {
+      // Završene utakmice - zeleni rezultat
+      return "text-green-600 font-bold text-xl min-w-[2rem] text-center";
+    }
+
+    // Ostale utakmice - default stil
+    return "text-foreground font-bold text-xl min-w-[2rem] text-center";
+  };
+
+  // 🔧 OPTIMIZIRANI: Status text generation
   const getStatusText = () => {
     if (isHalfTime) return "HT";
 
     if (isLive) {
-      const displayMinute = calculateDisplayMinute(match);
-      return displayMinute || "LIVE"; // Ako nema minute, samo "LIVE"
+      return displayMinute || "LIVE";
     }
 
     if (isFinished) return "FT";
@@ -54,7 +164,7 @@ export default function MatchCard({ match }) {
     return match.status || "N/A";
   };
 
-  // 🔧 ENHANCED: Debug info for development
+  // 🔧 POBOLJŠANI: Debug info s boljim podacima
   const renderDebugInfo = () => {
     if (!import.meta.env.DEV || (!isLive && !isHalfTime)) return null;
 
@@ -62,11 +172,12 @@ export default function MatchCard({ match }) {
     const isStatusOverridden = validatedStatus !== normalizedStatus;
     const hasBackendMinute =
       typeof match.minute === "number" && !isNaN(match.minute);
-    const displayMinute = calculateDisplayMinute(match);
 
     const now = new Date();
     const startTime = new Date(match.start_time);
     const hoursElapsed = (now - startTime) / (1000 * 60 * 60);
+    const realTimeMinute = calculateRealTimeMinute(match, now);
+    const shouldBeFinished = hoursElapsed > 2;
 
     return (
       <div className="text-[10px] text-right space-y-1">
@@ -75,26 +186,42 @@ export default function MatchCard({ match }) {
             isStatusOverridden ? "text-red-500 font-bold" : "text-blue-500"
           }
         >
-          Raw: {match.status} → Valid: {validatedStatus}
+          Status: {match.status} → {validatedStatus}
+        </div>
+
+        <div
+          className={
+            shouldBeFinished
+              ? "text-red-500 font-bold"
+              : "text-yellow-400 font-bold"
+          }
+        >
+          {shouldBeFinished ? "🚨 ZOMBIE" : "⏱️"} Real-time: {realTimeMinute}'
         </div>
 
         <div className={hasBackendMinute ? "text-green-500" : "text-red-500"}>
-          Backend: {hasBackendMinute ? `${match.minute}'` : "❌ MISSING"}
+          Backend: {hasBackendMinute ? `${match.minute}'` : "❌ NULL"}
         </div>
 
-        <div className="text-muted-foreground">
-          Display: {displayMinute || "LIVE"} | Hours: {hoursElapsed.toFixed(1)}h
+        <div
+          className={
+            shouldBeFinished ? "text-red-500" : "text-muted-foreground"
+          }
+        >
+          Age: {hoursElapsed.toFixed(1)}h {shouldBeFinished ? "⚠️" : ""}
         </div>
 
-        {!hasBackendMinute && (
-          <div className="text-red-500 font-bold">⚠️ USING FALLBACK!</div>
+        {hasBackendMinute && typeof realTimeMinute === "number" && (
+          <div className="text-cyan-400">
+            Diff: {Math.abs(realTimeMinute - match.minute)}m
+          </div>
         )}
       </div>
     );
   };
 
   return (
-    <li className="bg-border rounded-lg p-4 hover:bg-primary/50 hover:scale-[1.02] transition-all duration-500 ease-in-out ">
+    <li className="bg-border rounded-lg p-4 hover:bg-primary/50 hover:scale-[1.02] transition-all duration-300 ease-in-out cursor-pointer ">
       <Link to={`/match/${match.id}`} className="block">
         {/* Competition header */}
         <div className="text-center mb-3">
@@ -121,7 +248,7 @@ export default function MatchCard({ match }) {
                 {match.home_team}
               </span>
             </div>
-            <div className="text-foreground font-bold text-xl min-w-[2rem] text-center">
+            <div className={getScoreStyle()}>
               {match.home_score !== null
                 ? match.home_score
                 : isUpcoming
@@ -141,7 +268,7 @@ export default function MatchCard({ match }) {
                 {match.away_team}
               </span>
             </div>
-            <div className="text-foreground font-bold text-xl min-w-[2rem] text-center">
+            <div className={getScoreStyle()}>
               {match.away_score !== null
                 ? match.away_score
                 : isUpcoming
@@ -153,11 +280,19 @@ export default function MatchCard({ match }) {
 
         {/* Footer with status and time */}
         <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-600">
-          {/* Status badge */}
+          {/* 🔧 Status badge */}
           <span
             className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusBadgeStyle()}`}
           >
             {getStatusText()}
+            {/* Animirani indikator samo za validne live minute */}
+            {isLive &&
+              displayMinute &&
+              displayMinute !== "LIVE" &&
+              typeof displayMinute === "string" &&
+              displayMinute.includes("'") && (
+                <span className="ml-1 animate-pulse">⏱️</span>
+              )}
           </span>
 
           {/* Time and venue */}

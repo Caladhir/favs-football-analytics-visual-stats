@@ -1,294 +1,271 @@
-// src/utils/matchStatusUtils.js - POPRAVLJENA VERZIJA ZA LIVE PRIKAZ
-// Konzistentni status mapping s backendom
-const STATUS_MAPPING = {
-  // Live statusi
-  live: "live",
-  inplay: "live",
-  "1h": "live",
-  "2h": "live",
-  "1st_half": "live",
-  "2nd_half": "live",
-  inprogress: "live",
-
-  // Half-time
-  ht: "ht",
-  halftime: "ht",
-  half_time: "ht",
-
-  // Upcoming
-  upcoming: "upcoming",
-  not_started: "upcoming",
-  scheduled: "upcoming",
-  ns: "upcoming",
-  notstarted: "upcoming",
-
-  // Finished
-  finished: "finished",
-  ft: "finished",
-  full_time: "finished",
-  ended: "finished",
-  afterextra: "finished",
-  penalties: "finished",
-
-  // Other
-  canceled: "canceled",
-  cancelled: "canceled",
-  postponed: "postponed",
-  pp: "postponed",
-  abandoned: "abandoned",
-  ab: "abandoned",
-  suspended: "suspended",
-  susp: "suspended",
-};
+// src/utils/matchStatusUtils.js - POBOLJŠANA VERZIJA
 
 /**
- * Normalizira status utakmice prema definiranom mappingu
- * @param {string} status - Originalni status iz baze
- * @returns {string} Normalizirani status
+ * 🔧 POBOLJŠANO: Blaži filter za validne live utakmice
+ * Umjesto 3 sata, koristimo 6 sati kao limit za zombie utakmice
  */
-export function normalizeStatus(status) {
-  if (!status) return "upcoming";
-  return STATUS_MAPPING[status.toLowerCase()] || status.toLowerCase();
+export function getValidLiveMatches(matches, zombieHourLimit = 6) {
+  if (!matches || !Array.isArray(matches)) {
+    return [];
+  }
+
+  const now = new Date();
+
+  return matches.filter((match) => {
+    // Provjeri da li je utakmica označena kao live/ht
+    const isLiveStatus = ["live", "ht", "inprogress", "halftime"].includes(
+      match.status?.toLowerCase()
+    );
+
+    if (!isLiveStatus) {
+      return false;
+    }
+
+    // Provjeri da li je utakmica prekasno stara (zombie)
+    if (match.start_time) {
+      const startTime = new Date(match.start_time);
+      const hoursElapsed = (now - startTime) / (1000 * 60 * 60);
+
+      // 🔧 POBOLJŠANO: Blaži limit - 6 sati umjesto 3
+      if (hoursElapsed > zombieHourLimit) {
+        console.warn(
+          `⚠️ Zombie match detected: ${match.home_team} vs ${
+            match.away_team
+          } (${hoursElapsed.toFixed(1)}h old)`
+        );
+        return false;
+      }
+
+      // Provjeri da li je utakmica u budućnosti (greška u statusu)
+      if (hoursElapsed < -0.5) {
+        // 30 minuta tolerance
+        console.warn(
+          `⚠️ Future match marked as live: ${match.home_team} vs ${match.away_team}`
+        );
+        return false;
+      }
+    }
+
+    return true;
+  });
 }
 
 /**
- * Validira live status utakmice i ispravlja greške
- * @param {Object} match - Objekt utakmice
- * @returns {string} Validirani status
+ * 🔧 NOVO: Alternativna funkcija koja ne filtrira ništa (za debugging)
+ */
+export function getAllLiveMatches(matches) {
+  if (!matches || !Array.isArray(matches)) {
+    return [];
+  }
+
+  return matches.filter((match) => {
+    return ["live", "ht", "inprogress", "halftime"].includes(
+      match.status?.toLowerCase()
+    );
+  });
+}
+
+/**
+ * Pronađi problematične utakmice za debugging
+ */
+export function findProblemMatches(matches, strict = false) {
+  if (!matches || !Array.isArray(matches)) {
+    return [];
+  }
+
+  const now = new Date();
+  const problems = [];
+
+  matches.forEach((match) => {
+    const isLive = ["live", "ht", "inprogress", "halftime"].includes(
+      match.status?.toLowerCase()
+    );
+
+    if (!isLive) return;
+
+    if (match.start_time) {
+      const startTime = new Date(match.start_time);
+      const hoursElapsed = (now - startTime) / (1000 * 60 * 60);
+
+      // Različiti kriteriji za "problem"
+      const isZombie = strict ? hoursElapsed > 3 : hoursElapsed > 6;
+      const isFuture = hoursElapsed < -0.5;
+      const hasInvalidMinute =
+        match.minute && (match.minute > 120 || match.minute < 0);
+      const isVeryOld = hoursElapsed > 12; // Definitivno problem
+
+      if (isZombie || isFuture || hasInvalidMinute || isVeryOld) {
+        problems.push({
+          ...match,
+          problemType: isVeryOld
+            ? "very_old"
+            : isZombie
+            ? "zombie"
+            : isFuture
+            ? "future"
+            : "invalid_minute",
+          hoursElapsed: hoursElapsed.toFixed(1),
+        });
+      }
+    }
+  });
+
+  return problems;
+}
+
+/**
+ * 🔧 NOVO: Validacija statusa s boljom logikom
  */
 export function validateLiveStatus(match) {
+  if (!match || !match.status) {
+    return "upcoming";
+  }
+
+  const status = match.status.toLowerCase();
   const now = new Date();
-  const startTime = new Date(match.start_time);
-  const timeSinceStart = now - startTime;
-  const hoursElapsed = timeSinceStart / (1000 * 60 * 60);
 
-  const normalizedStatus = normalizeStatus(match.status);
-
-  // Ako je utakmica označena kao live, ali je prošlo više od 3 sata
-  if (
-    (normalizedStatus === "live" || normalizedStatus === "ht") &&
-    hoursElapsed > 3
-  ) {
-    console.warn(
-      `🚨 ZOMBIE MATCH DETECTED: ${match.home_team} vs ${match.away_team}`,
-      {
-        status: match.status,
-        startTime: match.start_time,
-        hoursElapsed: hoursElapsed.toFixed(1),
-      }
-    );
-    return "finished"; // Override status
+  // Ako nije označen kao live, vrati original status
+  if (!["live", "ht", "inprogress", "halftime"].includes(status)) {
+    return status;
   }
 
-  // Ako je utakmica u budućnosti, ali označena kao live
-  if (
-    startTime > now &&
-    (normalizedStatus === "live" || normalizedStatus === "ht")
-  ) {
-    console.warn(
-      `⏰ FUTURE MATCH MARKED AS LIVE: ${match.home_team} vs ${match.away_team}`
-    );
-    return "upcoming"; // Override status
+  // Provjeri vremensku logiku za live utakmice
+  if (match.start_time) {
+    const startTime = new Date(match.start_time);
+    const hoursElapsed = (now - startTime) / (1000 * 60 * 60);
+
+    // Ako je utakmica vrlo stara, vjerojatno je završena
+    if (hoursElapsed > 6) {
+      console.warn(
+        `🚨 Status validation: Forcing old live match to finished (${hoursElapsed.toFixed(
+          1
+        )}h old)`
+      );
+      return "finished";
+    }
+
+    // Ako je utakmica u budućnosti, vjerojatno je upcoming
+    if (hoursElapsed < -0.5) {
+      console.warn(
+        `🚨 Status validation: Forcing future live match to upcoming`
+      );
+      return "upcoming";
+    }
   }
 
-  return normalizedStatus;
+  // Inače vrati original status
+  return status;
 }
 
 /**
- * 🔧 NOVA LOGIKA: Provjeri je li backend minuta pouzdana
- * @param {Object} match - Objekt utakmice
- * @returns {boolean} Je li minuta pouzdana
+ * 🔧 POBOLJŠANO: Kalkulacija minute s boljom logikom
  */
-function isBackendMinuteReliable(match) {
-  const dbMinute = match.minute;
-
-  // Ako nema minute u bazi
-  if (typeof dbMinute !== "number" || isNaN(dbMinute) || dbMinute <= 0) {
-    return false;
-  }
-
-  // Provjeri je li minuta realna u odnosu na vrijeme početka
-  const now = new Date();
-  const startTime = new Date(match.start_time);
-  const minutesFromStart = Math.floor((now - startTime) / (1000 * 60));
-
-  // Ako je backend minuta previše različita od stvarnog vremena, nije pouzdana
-  const difference = Math.abs(dbMinute - minutesFromStart);
-
-  // Ako je razlika veća od 20 minuta, vjerojatno je greška
-  if (difference > 20) {
-    console.warn(
-      `⚠️ Backend minute ${dbMinute}' vs real time ${minutesFromStart}' - difference too large (${difference}m)`
-    );
-    return false;
-  }
-
-  // Ako je minuta preko 120, nije realna
-  if (dbMinute > 120) {
-    console.warn(`⚠️ Backend minute ${dbMinute}' too high - not reliable`);
-    return false;
-  }
-
-  return true;
-}
-
-/**
- * 🔧 POBOLJŠANA: Preferira backend minute, ali samo ako su pouzdane
- * @param {Object} match - Objekt utakmice
- * @returns {number|string|null} Minuta utakmice ili null ako nije live
- */
-export function calculateDisplayMinute(match) {
+export function calculateDisplayMinute(match, currentTime = new Date()) {
   const validatedStatus = validateLiveStatus(match);
 
-  // Samo za live utakmice prikazuj minutu
-  if (validatedStatus !== "live" && validatedStatus !== "ht") {
+  // Samo za live utakmice
+  if (!["live", "inprogress"].includes(validatedStatus)) {
     return null;
   }
 
-  // 🎯 NOVA LOGIKA: Provjeri pouzdanost backend minute
-  const isReliable = isBackendMinuteReliable(match);
-  const dbMinute = match.minute;
-
-  if (isReliable && typeof dbMinute === "number") {
-    console.log(
-      `✅ Using reliable backend minute: ${dbMinute}' for ${match.home_team} vs ${match.away_team}`
-    );
-
-    // Formatiraj minutu za prikaz
-    if (dbMinute >= 105) return `${dbMinute}' (ET)`;
-    if (dbMinute >= 90) return `${dbMinute}'+`;
-    return `${dbMinute}'`;
+  // Ako imamo backend minutu, koristi ju
+  if (
+    match.minute &&
+    typeof match.minute === "number" &&
+    match.minute > 0 &&
+    match.minute <= 120
+  ) {
+    return `${match.minute}'`;
   }
 
-  // 🔧 NOVA STRATEGIJA: Ako backend minuta nije pouzdana, prikaži samo "LIVE"
-  if (!isReliable) {
-    console.warn(
-      `⚠️ Backend minute not reliable for ${match.home_team} vs ${match.away_team} - showing LIVE`
-    );
-    return "LIVE";
+  // Fallback na real-time kalkulaciju
+  const realTimeMinute = calculateRealTimeMinute(match, currentTime);
+  if (realTimeMinute && realTimeMinute > 0 && realTimeMinute <= 120) {
+    return `${realTimeMinute}'`;
   }
 
-  // 🚨 FALLBACK: Samo ako backend baš nema minutu
-  console.warn(
-    `⚠️ No backend minute for ${match.home_team} vs ${match.away_team} - showing LIVE`
-  );
+  // Fallback na "LIVE"
   return "LIVE";
 }
 
 /**
- * Provjera ima li utakmica validne live utakmice za timer
- * @param {Array} matches - Niz utakmica
- * @returns {Array} Niz validnih live utakmica
+ * Kalkulacija minute na temelju vremena početka
  */
-export function getValidLiveMatches(matches) {
-  return matches.filter((match) => {
-    const validatedStatus = validateLiveStatus(match);
-    return validatedStatus === "live" || validatedStatus === "ht";
-  });
+export function calculateRealTimeMinute(match, currentTime = new Date()) {
+  if (!match.start_time) {
+    return null;
+  }
+
+  const startTime = new Date(match.start_time);
+  const minutesElapsed = Math.floor((currentTime - startTime) / (1000 * 60));
+
+  // Sigurnosne provjere
+  if (minutesElapsed < 0) return 1;
+  if (minutesElapsed > 150) return 90; // Cap na 90 za vrlo stare utakmice
+
+  // Real-time kalkulacija
+  if (minutesElapsed <= 45) {
+    return Math.max(1, minutesElapsed);
+  } else if (minutesElapsed <= 60) {
+    // Poluvrijeme ili dodatno vrijeme prvog poluvremena
+    return Math.min(45 + Math.max(0, minutesElapsed - 45), 50);
+  } else if (minutesElapsed <= 105) {
+    // Drugi poluvrijeme
+    return Math.min(45 + (minutesElapsed - 60), 90);
+  } else {
+    // Produžeci
+    return Math.min(90 + (minutesElapsed - 105), 120);
+  }
 }
 
 /**
- * Pronalazi problematične utakmice za debugging
- * @param {Array} matches - Niz utakmica
- * @returns {Array} Niz problematičnih utakmica
+ * 🔧 NOVO: Quick stats za debugging
  */
-export function findProblemMatches(matches) {
+export function getMatchesStats(matches) {
+  if (!matches || !Array.isArray(matches)) {
+    return { total: 0, live: 0, zombie: 0, valid: 0 };
+  }
+
   const now = new Date();
+  const stats = {
+    total: matches.length,
+    live: 0,
+    zombie: 0,
+    valid: 0,
+    recent: 0,
+    old: 0,
+  };
 
-  return matches.filter((match) => {
-    const normalizedStatus = normalizeStatus(match.status);
-    const startTime = new Date(match.start_time);
-    const hoursElapsed = (now - startTime) / (1000 * 60 * 60);
-
-    return (
-      (normalizedStatus === "live" || normalizedStatus === "ht") &&
-      hoursElapsed > 2
+  matches.forEach((match) => {
+    const isLive = ["live", "ht", "inprogress", "halftime"].includes(
+      match.status?.toLowerCase()
     );
-  });
-}
 
-/**
- * 🔧 POBOLJŠANA: Formatira status tekst za prikaz
- * @param {string} status - Status utakmice
- * @param {Object} match - Objekt utakmice (za minutu)
- * @returns {string} Formatiran status tekst
- */
-export function getDisplayStatusText(status, match) {
-  const validatedStatus = validateLiveStatus(match);
+    if (isLive) {
+      stats.live++;
 
-  switch (validatedStatus) {
-    case "ht":
-      return "HT";
-    case "live": {
-      const displayMinute = calculateDisplayMinute(match);
-      return displayMinute || "LIVE";
+      if (match.start_time) {
+        const startTime = new Date(match.start_time);
+        const hoursElapsed = (now - startTime) / (1000 * 60 * 60);
+
+        if (hoursElapsed > 6) {
+          stats.zombie++;
+        } else {
+          stats.valid++;
+        }
+
+        if (hoursElapsed < 0.5) {
+          stats.recent++;
+        }
+
+        if (hoursElapsed > 3) {
+          stats.old++;
+        }
+      } else {
+        stats.valid++; // Ako nema start_time, tretiramo kao valid
+      }
     }
-    case "finished":
-      return "FT";
-    case "canceled":
-      return "OTKAZANO";
-    case "postponed":
-      return "ODGOĐENO";
-    case "abandoned":
-      return "PREKID";
-    case "suspended":
-      return "PAUZA";
-    default:
-      return match.status || "N/A";
-  }
-}
-
-/**
- * 🔧 DEBUG HELPER: Provjeri kvalitetu backend podataka
- * @param {Array} matches - Niz utakmica
- */
-export function debugBackendMinutes(matches) {
-  if (!import.meta.env.DEV) return;
-
-  const liveMatches = matches.filter((m) => {
-    const status = validateLiveStatus(m);
-    return status === "live" || status === "ht";
   });
 
-  console.group("🔍 Backend Minutes Debug");
-
-  liveMatches.forEach((match) => {
-    const hasBackendMinute =
-      typeof match.minute === "number" && !isNaN(match.minute);
-    const isReliable = isBackendMinuteReliable(match);
-    const now = new Date();
-    const startTime = new Date(match.start_time);
-    const minutesFromStart = Math.floor((now - startTime) / (1000 * 60));
-
-    console.log(`${match.home_team} vs ${match.away_team}:`);
-    console.log(
-      `  Backend minute: ${
-        hasBackendMinute ? match.minute + "'" : "❌ MISSING"
-      }`
-    );
-    console.log(`  Is reliable: ${isReliable ? "✅ YES" : "❌ NO"}`);
-    console.log(`  Minutes from start: ${minutesFromStart}'`);
-    console.log(`  Status: ${match.status}`);
-
-    if (!isReliable) {
-      console.warn(`  ⚠️ Will show LIVE instead of minute!`);
-    }
-    console.log("---");
-  });
-
-  const reliableMatches = liveMatches.filter((m) => isBackendMinuteReliable(m));
-  const unreliableMatches = liveMatches.filter(
-    (m) => !isBackendMinuteReliable(m)
-  );
-
-  console.log(
-    `✅ ${reliableMatches.length}/${liveMatches.length} matches have reliable minutes`
-  );
-  if (unreliableMatches.length > 0) {
-    console.warn(
-      `🚨 ${unreliableMatches.length} matches will show "LIVE" instead of minute`
-    );
-  }
-
-  console.groupEnd();
+  return stats;
 }

@@ -1,7 +1,7 @@
-// src/components/CalendarPopover.jsx - REFINIRANI S VAŠIM DIZAJNOM
+// src/components/CalendarPopover.jsx - FIKSIRAN TIMEZONE PROBLEM
 import { useState, useRef, useEffect } from "react";
 import { DayPicker } from "react-day-picker";
-import { format, addDays, isToday, isYesterday, isTomorrow } from "date-fns";
+import { format } from "date-fns";
 import { ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 
 export default function CalendarPopover({ date, setDate }) {
@@ -37,15 +37,65 @@ export default function CalendarPopover({ date, setDate }) {
     }
   }, [open]);
 
+  // 🔧 FIKSIRANA: Promjena datuma s lokalnim vremenom
   const handleChange = (offset) => {
-    setDate((prev) => addDays(prev, offset));
+    setDate((prev) => {
+      // Koristi lokalno vrijeme umjesto UTC
+      const newDate = new Date(prev);
+      newDate.setDate(newDate.getDate() + offset);
+      return newDate;
+    });
   };
 
+  // 🔧 FIKSIRANA: Prikaz datuma s lokalnim vremenom
   const getDateDisplayText = () => {
-    if (isToday(date)) return "Today";
-    if (isYesterday(date)) return "Yesterday";
-    if (isTomorrow(date)) return "Tomorrow";
+    // Koristi lokalne datume za usporedbu
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Postavi na početak dana
+
+    const selectedDate = new Date(date);
+    selectedDate.setHours(0, 0, 0, 0); // Postavi na početak dana
+
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+
+    // Usporedi timestamp-ove
+    const selectedTime = selectedDate.getTime();
+    const todayTime = today.getTime();
+    const yesterdayTime = yesterday.getTime();
+    const tomorrowTime = tomorrow.getTime();
+
+    if (selectedTime === todayTime) return "Today";
+    if (selectedTime === yesterdayTime) return "Yesterday";
+    if (selectedTime === tomorrowTime) return "Tomorrow";
+
+    // Koristi lokalno formatiranje
     return format(date, "dd.MM.");
+  };
+
+  // 🔧 NOVA: Funkcija za postavljanje datuma s lokalnim vremenom
+  const handleDateSelect = (selected) => {
+    if (selected) {
+      // Stvori novi Date objekt s lokalnim vremenom (ne UTC)
+      const localDate = new Date(selected);
+      localDate.setHours(0, 0, 0, 0); // Postavi na početak dana
+      console.log("📅 Selected date:", localDate);
+      setDate(localDate);
+      setOpen(false);
+    }
+  };
+
+  // 🔧 NOVA: Today button s lokalnim vremenom
+  const handleTodayClick = () => {
+    const today = new Date();
+    // Postavi na početak dana u lokalnom vremenu
+    today.setHours(0, 0, 0, 0);
+    console.log("📅 Setting today date:", today);
+    setDate(today);
+    setOpen(false);
   };
 
   return (
@@ -97,12 +147,7 @@ export default function CalendarPopover({ date, setDate }) {
           <DayPicker
             mode="single"
             selected={date}
-            onSelect={(selected) => {
-              if (selected) {
-                setDate(selected);
-                setOpen(false);
-              }
-            }}
+            onSelect={handleDateSelect} // 🔧 Koristi novu funkciju
             weekStartsOn={1}
             showOutsideDays
             modifiersClassNames={{
@@ -112,10 +157,7 @@ export default function CalendarPopover({ date, setDate }) {
           />
 
           <button
-            onClick={() => {
-              setDate(new Date());
-              setOpen(false);
-            }}
+            onClick={handleTodayClick} // 🔧 Koristi novu funkciju
             className="block w-1/2 mx-auto text-center mt-3 bg-primary hover:bg-accent text-primary-foreground font-semibold py-1 rounded transition-colors duration-200"
           >
             TODAY
