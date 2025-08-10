@@ -1,10 +1,9 @@
-// src/pages/app_layout/Matches.jsx - ISPRAVKA TAB NAVIGACIJE
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+// src/pages/app_layout/Matches.jsx
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { getValidLiveMatches } from "../../utils/matchStatusUtils";
+import { useLiveMatches } from "../../hooks/useLiveMatches";
 import useMatchesByDate from "../../hooks/useMatchesByDate";
 
-// Tab komponente
 import AllMatches from "../../features/tabs/AllMatches";
 import LiveMatches from "../../features/tabs/LiveMatches";
 import UpcomingMatches from "../../features/tabs/UpcomingMatches";
@@ -23,31 +22,38 @@ export default function Matches() {
   const isFirstRender = useRef(true);
   const [loadedTabs, setLoadedTabs] = useState(new Set());
 
-  // Get today's matches za live count
-  const { matches: todayMatches } = useMatchesByDate(new Date());
-  const liveMatchesCount = useMemo(() => {
-    return getValidLiveMatches(todayMatches || []).length;
-  }, [todayMatches]);
+  const { matches: liveMatches } = useLiveMatches();
 
-  // 🔧 ISPRAVKA: Ukloni useCallback i koristi jednostavniju logiku
+  const liveMatchesCount = useMemo(() => {
+    const count = liveMatches?.length || 0;
+
+    if (import.meta.env.DEV) {
+      console.log(`🔴 Live count for header: ${count} matches`);
+      if (count > 0) {
+        console.log(
+          "Live matches:",
+          liveMatches
+            .slice(0, 3)
+            .map((m) => `${m.home_team} vs ${m.away_team} (${m.status})`)
+        );
+      }
+    }
+
+    return count;
+  }, [liveMatches]);
+
   const getCurrentTab = () => {
     const path = location.pathname;
-    console.log("🔍 Current path:", path); // Debug log
-
     if (path.includes("/matches/live")) return "live";
     if (path.includes("/matches/upcoming")) return "upcoming";
     if (path.includes("/matches/finished")) return "finished";
     return "all";
   };
 
-  const [tab, setTab] = useState(() => {
-    const currentTab = getCurrentTab();
-    console.log("🔍 Initial tab:", currentTab); // Debug log
-    return currentTab;
-  });
+  const [tab, setTab] = useState(() => getCurrentTab());
 
   const handleTabChange = (newTab) => {
-    console.log("🔄 Tab change:", tab, "→", newTab); // Debug log
+    console.log("🔄 Tab change:", tab, "→", newTab);
 
     setLoadedTabs((prev) => new Set([...prev, newTab]));
     setTab(newTab);
@@ -58,8 +64,6 @@ export default function Matches() {
 
   useEffect(() => {
     const currentTab = getCurrentTab();
-    console.log("🔍 Location changed - current tab should be:", currentTab);
-
     if (currentTab !== tab) {
       console.log("🔄 Updating tab state:", tab, "→", currentTab);
       setTab(currentTab);
@@ -67,7 +71,6 @@ export default function Matches() {
     }
   }, [location.pathname]);
 
-  // Pre-load tab-ove
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
@@ -81,8 +84,6 @@ export default function Matches() {
       }
     }
   }, [tab, liveMatchesCount]);
-
-  console.log("🔍 Current tab state:", tab, "| Path:", location.pathname);
 
   const renderTabButton = (key, { label, icon }) => {
     const isActive = tab === key;
@@ -130,7 +131,6 @@ export default function Matches() {
     );
   };
 
-  // Render komponente
   const renderActiveTab = () => {
     const isLoaded = loadedTabs.has(tab);
     if (!isLoaded) {
@@ -144,7 +144,6 @@ export default function Matches() {
       );
     }
 
-    // Direktan pristup komponenti
     switch (tab) {
       case "live":
         return <LiveMatches />;
@@ -158,9 +157,18 @@ export default function Matches() {
     }
   };
 
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log("🔍 Matches.jsx Debug Info:", {
+        currentTab: tab,
+        liveMatchesCount,
+        totalLiveMatches: liveMatches?.length || 0,
+      });
+    }
+  }, [tab, liveMatchesCount, liveMatches]);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
       <section className="text-center mt-6 mb-2">
         <h1 className="text-4xl font-black text-primary text-outline">
           Matches
@@ -175,7 +183,6 @@ export default function Matches() {
         </p>
       </section>
 
-      {/* Tab navigation */}
       <div className="flex justify-center gap-3 mt-8 mb-6 px-4">
         <div className="flex gap-2 p-2 bg-muted/50 rounded-2xl backdrop-blur-sm">
           {Object.entries(TABS).map(([key, tabInfo]) =>
@@ -184,16 +191,15 @@ export default function Matches() {
         </div>
       </div>
 
-      {/* 🔧 DEBUG: Prikaz trenutnog stanja */}
       {import.meta.env.DEV && (
-        <div className="fixed top-4 right-4 bg-black text-white p-2 rounded text-xs z-50">
+        <div className="fixed top-4 right-4 bg-black text-white p-3 rounded text-xs z-50">
+          <div className="font-bold mb-2">🔴 Live Debug</div>
           <div>Tab: {tab}</div>
-          <div>Path: {location.pathname}</div>
-          <div>Loaded: {Array.from(loadedTabs).join(", ")}</div>
+          <div>Live Count: {liveMatchesCount}</div>
+          <div>Time: {new Date().toLocaleTimeString()}</div>
         </div>
       )}
 
-      {/* Active tab content */}
       <div className="relative">{renderActiveTab()}</div>
     </div>
   );

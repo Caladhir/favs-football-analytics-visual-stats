@@ -1,9 +1,9 @@
+// src/hooks/useLiveMatches.js
 import { useState, useEffect, useCallback } from "react";
 import supabase from "../services/supabase";
 import { getValidLiveMatchesRelaxed } from "../utils/liveMatchFilters";
-import { findProblemMatches } from "../utils/matchStatusUtils";
 
-export function useLiveMatches() {
+export function useLiveMatches(autoFetch = true) {
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
@@ -38,48 +38,23 @@ export function useLiveMatches() {
 
       const rawMatches = data || [];
 
-      // 🔧 KORISTI NOVO BLAŽJI FILTER
       const validLiveMatches = getValidLiveMatchesRelaxed(rawMatches);
-
-      // 🔧 DEBUG: Analiziraj what we filtered out
-      if (import.meta.env.DEV) {
-        const filtered = rawMatches.filter(
-          (m) => !validLiveMatches.includes(m)
-        );
-        if (filtered.length > 0) {
-          console.group("🔍 FILTERED OUT MATCHES");
-          filtered.slice(0, 5).forEach((match) => {
-            const startTime = new Date(match.start_time);
-            const hoursElapsed = (
-              (new Date() - startTime) /
-              (1000 * 60 * 60)
-            ).toFixed(1);
-            console.log(
-              `❌ ${match.home_team} vs ${match.away_team} (${hoursElapsed}h old)`
-            );
-          });
-          if (filtered.length > 5) {
-            console.log(`... and ${filtered.length - 5} more filtered matches`);
-          }
-          console.groupEnd();
-        }
-
-        // Analiziraj distribuciju po ligama
-        const leagueDistribution = validLiveMatches.reduce((acc, match) => {
-          const league = match.competition || "Unknown";
-          acc[league] = (acc[league] || 0) + 1;
-          return acc;
-        }, {});
-
-        console.log("🏆 League distribution:", leagueDistribution);
-      }
 
       setMatches(validLiveMatches);
 
-      if (isBackgroundRefresh) {
+      if (import.meta.env.DEV) {
         console.log(
-          `🔄 Live matches refresh: ${validLiveMatches.length} matches`
+          `🔴 Live matches fetched: ${validLiveMatches.length} valid (${rawMatches.length} total)`
         );
+
+        if (validLiveMatches.length > 0) {
+          console.log(
+            "Sample live matches:",
+            validLiveMatches
+              .slice(0, 3)
+              .map((m) => `${m.home_team} vs ${m.away_team} (${m.status})`)
+          );
+        }
       }
     } catch (err) {
       console.error("Error fetching live matches:", err);
@@ -93,26 +68,21 @@ export function useLiveMatches() {
     }
   }, []);
 
-  // Debug problematičnih utakmica
   useEffect(() => {
-    if (import.meta.env.DEV && matches.length > 0) {
-      const problemMatches = findProblemMatches(matches, false);
-
-      if (problemMatches.length > 0) {
-        console.group("🚨 LIVE TAB - PROBLEM MATCHES");
-        problemMatches.forEach((match) => {
-          console.warn(`${match.home_team} vs ${match.away_team}`, {
-            problemType: match.problemType,
-            status: match.status,
-            startTime: match.start_time,
-            minute: match.minute,
-            hoursElapsed: match.hoursElapsed,
-          });
-        });
-        console.groupEnd();
-      }
+    if (autoFetch) {
+      fetchLiveMatches();
     }
-  }, [matches]);
+  }, [fetchLiveMatches, autoFetch]);
+
+  useEffect(() => {
+    if (!autoFetch || matches.length === 0) return;
+
+    const interval = setInterval(() => {
+      fetchLiveMatches(true);
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [fetchLiveMatches, autoFetch, matches.length]);
 
   return {
     matches,

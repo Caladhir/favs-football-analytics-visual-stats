@@ -4,8 +4,12 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"vite\" \"python scraper/fetch_loop.py\"",
+    "dev": "concurrently --names \"VITE,SCRAPER\" --prefix-colors \"blue,green\" \"vite\" \"python scraper/fetch_loop.py\"",
+    "dev:simple": "concurrently \"vite\" \"python scraper/fetch_loop.py\"",
+    "dev:single": "concurrently --names \"VITE,SCRAPER\" --prefix-colors \"blue,green\" \"vite\" \"python scraper/main.py\"",
     "backend": "python scraper/fetch_loop.py",
+    "backend:single": "python scraper/main.py",
+    "backend:continuous": "python scraper/fetch_loop.py",
     "build": "vite build",
     "preview": "vite preview",
     "inspect": "vite build --mode development && vite-plugin-inspect",
