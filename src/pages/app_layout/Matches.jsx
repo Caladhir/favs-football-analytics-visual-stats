@@ -1,6 +1,6 @@
-// src/pages/app_layout/Matches.jsx - BEZ ESLint warning-a
+// src/pages/app_layout/Matches.jsx - ISPRAVKA TAB NAVIGACIJE
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { getValidLiveMatches } from "../../utils/matchStatusUtils";
 import useMatchesByDate from "../../hooks/useMatchesByDate";
 
@@ -19,6 +19,7 @@ const TABS = {
 
 export default function Matches() {
   const location = useLocation();
+  const navigate = useNavigate();
   const isFirstRender = useRef(true);
   const [loadedTabs, setLoadedTabs] = useState(new Set());
 
@@ -28,33 +29,43 @@ export default function Matches() {
     return getValidLiveMatches(todayMatches || []).length;
   }, [todayMatches]);
 
-  // 🔧 ISPRAVKA: useCallback za getCurrentTab
-  const getCurrentTab = useCallback(() => {
+  // 🔧 ISPRAVKA: Ukloni useCallback i koristi jednostavniju logiku
+  const getCurrentTab = () => {
     const path = location.pathname;
+    console.log("🔍 Current path:", path); // Debug log
+
     if (path.includes("/matches/live")) return "live";
     if (path.includes("/matches/upcoming")) return "upcoming";
     if (path.includes("/matches/finished")) return "finished";
     return "all";
-  }, [location.pathname]);
-
-  const [tab, setTab] = useState(() => getCurrentTab());
-
-  // Handle tab change
-  const handleTabChange = (newTab) => {
-    setLoadedTabs((prev) => new Set([...prev, newTab]));
-    setTab(newTab);
-    const newPath = newTab === "all" ? "/matches" : `/matches/${newTab}`;
-    window.history.replaceState(null, "", newPath);
   };
 
-  // 🔧 ISPRAVKA: Proper dependencies
+  const [tab, setTab] = useState(() => {
+    const currentTab = getCurrentTab();
+    console.log("🔍 Initial tab:", currentTab); // Debug log
+    return currentTab;
+  });
+
+  const handleTabChange = (newTab) => {
+    console.log("🔄 Tab change:", tab, "→", newTab); // Debug log
+
+    setLoadedTabs((prev) => new Set([...prev, newTab]));
+    setTab(newTab);
+
+    const newPath = newTab === "all" ? "/matches" : `/matches/${newTab}`;
+    navigate(newPath, { replace: true });
+  };
+
   useEffect(() => {
     const currentTab = getCurrentTab();
+    console.log("🔍 Location changed - current tab should be:", currentTab);
+
     if (currentTab !== tab) {
+      console.log("🔄 Updating tab state:", tab, "→", currentTab);
       setTab(currentTab);
       setLoadedTabs((prev) => new Set([...prev, currentTab]));
     }
-  }, [getCurrentTab, tab]); // Proper dependencies
+  }, [location.pathname]);
 
   // Pre-load tab-ove
   useEffect(() => {
@@ -71,7 +82,8 @@ export default function Matches() {
     }
   }, [tab, liveMatchesCount]);
 
-  // Render tab button
+  console.log("🔍 Current tab state:", tab, "| Path:", location.pathname);
+
   const renderTabButton = (key, { label, icon }) => {
     const isActive = tab === key;
     const showLiveCount = key === "live" && liveMatchesCount > 0;
@@ -171,6 +183,15 @@ export default function Matches() {
           )}
         </div>
       </div>
+
+      {/* 🔧 DEBUG: Prikaz trenutnog stanja */}
+      {import.meta.env.DEV && (
+        <div className="fixed top-4 right-4 bg-black text-white p-2 rounded text-xs z-50">
+          <div>Tab: {tab}</div>
+          <div>Path: {location.pathname}</div>
+          <div>Loaded: {Array.from(loadedTabs).join(", ")}</div>
+        </div>
+      )}
 
       {/* Active tab content */}
       <div className="relative">{renderActiveTab()}</div>
