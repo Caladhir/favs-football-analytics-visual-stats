@@ -1,49 +1,37 @@
 // src/utils/liveMatchFilters.js
-export function getValidLiveMatchesRelaxed(matches) {
-  if (!matches || !Array.isArray(matches)) {
-    return [];
-  }
+import { normalizeStatus } from "./matchStatusUtils";
+import { LIVE_STALE_SEC, MAX_LIVE_AGE_HOURS } from "../services/live";
 
-  const now = new Date();
-  let filteredCount = 0;
+const LIVE_SET = new Set(["live", "ht", "inprogress", "halftime"]);
 
-  const valid = matches.filter((match) => {
-    const isLiveStatus = ["live", "ht", "inprogress", "halftime"].includes(
-      match.status?.toLowerCase()
-    );
+const tooOld = (start, maxH = MAX_LIVE_AGE_HOURS) => {
+  const t = new Date(start).getTime();
+  return Number.isFinite(t) && (Date.now() - t) / 36e5 > maxH;
+};
 
-    if (!isLiveStatus) {
-      return false;
-    }
+export function getValidLiveMatchesStrict(matches, opts = {}) {
+  const staleCutoffSec = opts.staleCutoffSec ?? LIVE_STALE_SEC;
+  const maxAgeHours = opts.maxAgeHours ?? MAX_LIVE_AGE_HOURS;
+  const now = Date.now();
 
-    if (match.start_time) {
-      const startTime = new Date(match.start_time);
-      const hoursElapsed = (now - startTime) / (1000 * 60 * 60);
+  return (matches || []).filter((m) => {
+    const s = normalizeStatus(m.status || m.status_type);
+    if (!LIVE_SET.has(s)) return false;
+    if (tooOld(m.start_time, maxAgeHours)) return false;
 
-      if (hoursElapsed > 10) {
-        console.warn(
-          `⚠️ Very old match filtered: ${match.home_team} vs ${
-            match.away_team
-          } (${hoursElapsed.toFixed(1)}h old)`
-        );
-        filteredCount++;
-        return false;
-      }
+    // HT ne kažnjavaj po updated_at (pauza)
+    if (s === "ht") return true;
 
-      if (hoursElapsed < -2) {
-        console.warn(
-          `⚠️ Future match filtered: ${match.home_team} vs ${match.away_team}`
-        );
-        filteredCount++;
-        return false;
-      }
-    }
-
-    return true;
+    if (!m.updated_at) return true;
+    const upd = new Date(m.updated_at).getTime();
+    if (!Number.isFinite(upd)) return true;
+    return now - upd <= staleCutoffSec * 1000;
   });
+}
 
-  console.log(
-    `🔍 Live filter: ${matches.length} raw → ${valid.length} valid (filtered: ${filteredCount})`
-  );
-  return valid;
+export function getValidLiveMatches(matches) {
+  return getValidLiveMatchesStrict(matches, {
+    staleCutoffSec: LIVE_STALE_SEC,
+    maxAgeHours: MAX_LIVE_AGE_HOURS,
+  });
 }

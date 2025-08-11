@@ -1,51 +1,40 @@
-// src/hooks/useAutoRefresh.js - OČIŠĆENO
+// src/hooks/useAutoRefresh.js
 import { useEffect, useRef } from "react";
-import { getValidLiveMatches } from "../utils/matchStatusUtils";
+import { getValidLiveMatches } from "../utils/liveMatchFilters";
+import { LIVE_REFRESH_MS, IDLE_REFRESH_MS } from "../services/live";
 
-/*
-  Hook koji automatski refresha podatke kada postoje live utakmice
- */
 export function useAutoRefresh(
   matches = [],
-  refreshCallback,
-  interval = 30000
+  refresh,
+  liveMs = LIVE_REFRESH_MS,
+  idleMs = IDLE_REFRESH_MS
 ) {
   const intervalRef = useRef(null);
-  const callbackRef = useRef(refreshCallback);
-
+  const cbRef = useRef(refresh);
   useEffect(() => {
-    callbackRef.current = refreshCallback;
-  }, [refreshCallback]);
+    cbRef.current = refresh;
+  }, [refresh]);
 
   useEffect(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+    const hasLive = getValidLiveMatches(matches).length > 0;
+    const period = hasLive ? liveMs : idleMs;
 
-    const liveMatches = getValidLiveMatches(matches);
-
-    if (liveMatches.length > 0) {
-      intervalRef.current = setInterval(() => {
-        if (callbackRef.current) {
-          callbackRef.current();
-        }
-      }, interval);
-    }
-
+    intervalRef.current = setInterval(() => {
+      if (cbRef.current) cbRef.current();
+    }, period);
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
+      if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [matches, interval]);
+  }, [matches, liveMs, idleMs]);
 
-  useEffect(() => {
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, []);
+  useEffect(
+    () => () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    },
+    []
+  );
 }

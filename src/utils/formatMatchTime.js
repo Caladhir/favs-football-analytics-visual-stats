@@ -1,50 +1,38 @@
-// src/utils/formatMatchTime.js - ISPRAVKA ZA TIMEZONE
+// src/utils/formatMatchTime.js
 export function formatMatchTime(startTime) {
-  if (!startTime) {
-    return {
-      formattedDate: "Unknown Date",
-      formattedTime: "Unknown Time",
-    };
+  if (startTime == null) {
+    return { formattedDate: "Unknown Date", formattedTime: "Unknown Time" };
   }
 
+  let d;
   try {
-    // 🔧 POBOLJŠANO: Konvertuj UTC vrijeme u lokalno
-    const utcDate = new Date(startTime);
-
-    // Provjeri da li je valid datum
-    if (isNaN(utcDate.getTime())) {
-      throw new Error("Invalid date");
+    if (typeof startTime === "number") {
+      // Ako je 10-znamenkasto -> sekunde; 13-znamenkasto -> milisekunde
+      const ms = startTime < 1e12 ? startTime * 1000 : startTime;
+      d = new Date(ms);
+    } else {
+      const s = String(startTime);
+      // Ako string već ima timezone, prepusti JS-u;
+      // ako nema TZ, tretiraj kao UTC da izbjegnemo lokalne pomake na backendu
+      d = /Z$|[+\-]\d{2}:\d{2}$/.test(s)
+        ? new Date(s)
+        : new Date(s + (s.includes("T") ? "" : "T") + "Z");
     }
 
-    // Format datum u lokalnom vremenu
-    const formattedDate = utcDate.toLocaleDateString("hr-HR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
-
-    // Format vrijeme u lokalnom vremenu (24-satni format)
-    const formattedTime = utcDate.toLocaleTimeString("hr-HR", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false, // 24-satni format
-    });
-
+    if (isNaN(d.getTime())) throw new Error("Invalid date");
     return {
-      formattedDate,
-      formattedTime,
+      formattedDate: d.toLocaleDateString("hr-HR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      }),
+      formattedTime: d.toLocaleTimeString("hr-HR", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }),
     };
-  } catch (error) {
-    console.warn(
-      "Error formatting match time:",
-      error,
-      "startTime:",
-      startTime
-    );
-
-    return {
-      formattedDate: "Invalid Date",
-      formattedTime: "Invalid Time",
-    };
+  } catch {
+    return { formattedDate: "Invalid Date", formattedTime: "Invalid Time" };
   }
 }
