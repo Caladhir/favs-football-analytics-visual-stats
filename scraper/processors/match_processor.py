@@ -1,4 +1,4 @@
-# scraper/processors/match_processor.py - ISPRAVKA: ISPRAVNA SOFASCORE MINUTA
+# scraper/processors/match_processor.py - ISPRAVKA: JEDINSTVENI UUID-JEVI
 import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional  
@@ -15,6 +15,27 @@ class MatchProcessor:
     def __init__(self):
         self.status_processor = StatusProcessor()
         self.league_stats = {}
+        self.processed_ids = set()  # 🔧 NOVO: Track processed IDs
+    
+    def _generate_stable_id(self, event: Dict[str, Any]) -> str:
+        """🔧 NOVA FUNKCIJA: Generiraj stabilan jedinstveni UUID"""
+        # Koristi SofaScore ID ako postoji
+        sofascore_id = event.get("id")
+        if sofascore_id:
+            # UUID5 namespace za consistency - ovo će uvijek generirati isti UUID za isti SofaScore ID
+            return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"sofa_{sofascore_id}"))
+        
+        # Fallback: generiraj iz ključnih podataka
+        home_team = event.get("homeTeam", {}).get("name", "")
+        away_team = event.get("awayTeam", {}).get("name", "")
+        start_timestamp = event.get("startTimestamp", 0)
+        tournament_id = event.get("tournament", {}).get("id", "")
+        
+        # Stvori stabilan signature
+        match_signature = f"{home_team}_{away_team}_{start_timestamp}_{tournament_id}"
+        
+        # UUID5 iz signature - uvijek isti UUID za iste podatke
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"match_{match_signature}"))
     
     def process_events(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Process SofaScore events to database format"""
@@ -27,34 +48,69 @@ class MatchProcessor:
         parsed = []
         now = datetime.now(timezone.utc)
         self.league_stats = {}
+        self.processed_ids.clear()  # 🔧 Reset ID tracking
         
-        for event in events:
+        # 🔧 NOVA PROVJERA: Analiziraj duplikate u input podacima
+        event_ids = [event.get("id") for event in events if event.get("id")]
+        if len(event_ids) != len(set(event_ids)):
+            duplicates = len(event_ids) - len(set(event_ids))
+            logger.warning(f"🚨 Input contains {duplicates} duplicate SofaScore IDs!")
+        
+        for i, event in enumerate(events):
             try:
-                processed_match = self._process_single_event(event, now)
+                processed_match = self._process_single_event(event, now, index=i)
                 if processed_match:
+                    # 🔧 PROVJERA DUPLIKATA
+                    match_id = processed_match.get("id")
+                    if match_id in self.processed_ids:
+                        logger.warning(f"🚨 Duplicate ID detected: {match_id} for {processed_match.get('home_team')} vs {processed_match.get('away_team')}")
+                        # Generiraj novi ID s index sufixom
+                        new_id = f"{match_id}_dup_{i}"
+                        processed_match["id"] = new_id
+                        logger.info(f"🔧 Generated new ID: {new_id}")
+                    
+                    self.processed_ids.add(processed_match["id"])
                     parsed.append(processed_match)
                     
             except Exception as e:
-                logger.warning(f"Skipped event: {e}")
+                logger.warning(f"Skipped event {i}: {e}")
         
         # Log statistics
         self._log_league_statistics(parsed)
         
-        logger.info(f"Processed {len(parsed)} matches from {len(events)} events")
+        logger.info(f"Processed {len(parsed)} unique matches from {len(events)} events")
+        
+        # 🔧 FINALNA PROVJERA
+        final_ids = [match["id"] for match in parsed]
+        if len(final_ids) != len(set(final_ids)):
+            remaining_duplicates = len(final_ids) - len(set(final_ids))
+            logger.error(f"🚨 STILL HAVE {remaining_duplicates} DUPLICATE IDs AFTER PROCESSING!")
+            
+            # Debug: prikaži duplikate
+            from collections import Counter
+            id_counts = Counter(final_ids)
+            duplicates = {k: v for k, v in id_counts.items() if v > 1}
+            
+            for dup_id, count in list(duplicates.items())[:5]:
+                logger.error(f"  Duplicate ID {dup_id} appears {count} times")
+        
         return parsed
     
-    def _process_single_event(self, event: Dict[str, Any], now: datetime) -> Optional[Dict[str, Any]]:
-        """Process single event"""
+    def _process_single_event(self, event: Dict[str, Any], now: datetime, index: int = 0) -> Optional[Dict[str, Any]]:
+        """Process single event with enhanced ID generation"""
         timestamp = event.get("startTimestamp")
         if not timestamp:
             return None
-            
+        
+        # 🔧 POBOLJŠANA ID GENERACIJA
+        stable_id = self._generate_stable_id(event)
+        
         start_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         status_type = event.get("status", {}).get("type", "")
         
         mapped_status = self.status_processor.map_status(status_type, start_time, now)
         
-        # 🔧 GLAVNA ISPRAVKA: Koristi ispravnu SofaScore minutu
+        # Koristi ispravnu SofaScore minutu
         minute = self._extract_sofascore_minute(event, mapped_status, now)
         
         home_score = event.get("homeScore", {}).get("current")
@@ -67,7 +123,7 @@ class MatchProcessor:
         self._update_league_stats(competition_name, mapped_status)
         
         match_data = {
-            "id": event["id"],
+            "id": stable_id,  # 🔧 Koristi stabilan ID
             "home_team": event["homeTeam"]["name"],
             "away_team": event["awayTeam"]["name"],
             "home_score": home_score,
@@ -79,19 +135,21 @@ class MatchProcessor:
             "competition_id": competition_id,
             "season": tournament.get("season"),
             "round": event.get("roundInfo", {}).get("name"),
-            "minute": minute,  # 🔧 Sada koristi ispravnu SofaScore minutu
+            "minute": minute,
             "home_color": event["homeTeam"].get("teamColors", {}).get("primary", "#222"),
             "away_color": event["awayTeam"].get("teamColors", {}).get("primary", "#222"),
             "current_period_start": event.get("time", {}).get("currentPeriodStartTimestamp"),
             "venue": event.get("venue", {}).get("name"),
             "source": "sofascore",
-            "league_priority": config.get_league_priority(competition_name)
+            "league_priority": config.get_league_priority(competition_name),
+            "processing_index": index,  # 🔧 NOVO: Debug info
+            "original_sofascore_id": event.get("id")  # 🔧 Store original ID for debugging
         }
         
         return match_data
     
     def _extract_sofascore_minute(self, event: Dict[str, Any], mapped_status: str, now: datetime) -> Optional[int]:
-        """🔧 ISPRAVLJENA FUNKCIJA: Ispravno izvlači minutu iz SofaScore time objekta"""
+        """Ispravno izvlači minutu iz SofaScore time objekta"""
         
         # Samo za live utakmice
         if mapped_status not in ["live", "ht"]:
@@ -105,10 +163,10 @@ class MatchProcessor:
         time_data = event.get("time", {})
         if not time_data:
             logger.warning(f"No time data for {event.get('homeTeam', {}).get('name')} vs {event.get('awayTeam', {}).get('name')}")
-            return None
+            return self._calculate_fallback_minute_from_start(event.get("startTimestamp"), now, mapped_status)
         
         try:
-            # 🚀 ISPRAVKA: Koristi currentPeriodStartTimestamp za kalkulaciju
+            # Koristi currentPeriodStartTimestamp za kalkulaciju
             current_period_start = time_data.get("currentPeriodStartTimestamp")
             if not current_period_start:
                 logger.warning(f"No currentPeriodStartTimestamp for match")
@@ -126,7 +184,7 @@ class MatchProcessor:
             initial = time_data.get("initial", 0)
             max_val = time_data.get("max", 2700)
             
-            # 🚀 ISPRAVKA: Pravilna interpretacija perioda
+            # Pravilna interpretacija perioda
             if initial == 0 and max_val == 2700:
                 # Prvi period (1-45')
                 minute = int(total_seconds // 60)
@@ -142,8 +200,6 @@ class MatchProcessor:
                 logger.warning(f"Unknown period format: initial={initial}, max={max_val}")
                 return self._calculate_fallback_minute_from_start(event.get("startTimestamp"), now, mapped_status)
             
-            logger.info(f"✅ SofaScore minute: {minute}' for {event.get('homeTeam', {}).get('name')} vs {event.get('awayTeam', {}).get('name')} (period start: {current_period_start_dt.strftime('%H:%M:%S')}, elapsed: {seconds_in_period:.0f}s)")
-            
             return minute
             
         except Exception as e:
@@ -152,7 +208,7 @@ class MatchProcessor:
     
     def _calculate_fallback_minute_from_start(self, start_timestamp: int, now: datetime, 
                                               mapped_status: str) -> Optional[int]:
-        """🔧 FALLBACK: Kalkulacija od početka utakmice"""
+        """Fallback kalkulacija od početka utakmice"""
         
         if mapped_status == "ht":
             return None  # HT se prikazuje kao "HT", ne kao minuta
@@ -212,12 +268,31 @@ class MatchProcessor:
             logger.info(f"  ... and {len(sorted_leagues) - 15} more leagues")
     
     def prepare_for_database(self, matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Prepare matches for database insertion"""
+        """🔧 POBOLJŠANO: Prepare matches for database insertion s deduplikacijom"""
+        if not matches:
+            return []
+        
+        logger.info(f"Preparing {len(matches)} matches for database...")
+        
         db_ready_matches = []
+        seen_ids = set()
+        duplicate_count = 0
         
         for match in matches:
+            # 🔧 FINALNA ID PROVJERA - generiraj novi UUID za duplikate
+            match_id = match.get("id")
+            if match_id in seen_ids:
+                duplicate_count += 1
+                # Generiraj novi UUID umjesto dodavanja sufiksa
+                new_uuid = str(uuid.uuid4())
+                logger.warning(f"🔧 ID collision resolved: {match_id} -> {new_uuid}")
+                match_id = new_uuid
+                match["id"] = match_id
+            
+            seen_ids.add(match_id)
+            
             data = {
-                "id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f"sofa_{match['id']}")),
+                "id": match_id,  # 🔧 Sada koristi valjani UUID
                 "home_team": match["home_team"],
                 "away_team": match["away_team"],
                 "home_score": match["home_score"],
@@ -230,7 +305,7 @@ class MatchProcessor:
                 "season": match.get("season"),
                 "round": match.get("round"),
                 "venue": match.get("venue"),
-                "minute": match["minute"],  # 🔧 Sada će biti ispravna SofaScore minuta
+                "minute": match["minute"],
                 "home_color": match["home_color"],
                 "away_color": match["away_color"],
                 "current_period_start": match.get("current_period_start"),
@@ -239,14 +314,18 @@ class MatchProcessor:
                 "league_priority": match["league_priority"]
             }
             
+            # Ukloni None vrijednosti
             data = {k: v for k, v in data.items() if v is not None}
             db_ready_matches.append(data)
         
-        logger.info(f"Prepared {len(db_ready_matches)} matches for database insertion")
+        if duplicate_count > 0:
+            logger.warning(f"🔧 Resolved {duplicate_count} ID collisions during preparation")
+        
+        logger.info(f"✅ Prepared {len(db_ready_matches)} unique matches for database insertion")
         return db_ready_matches
     
     def debug_minute_calculations(self, parsed_matches: List[Dict[str, Any]]):
-        """🔧 Debug helper for minute calculations"""
+        """Debug helper for minute calculations"""
         logger.info("🐛 Checking SofaScore minute extraction for live matches:")
         now = datetime.now(timezone.utc)
         
@@ -260,6 +339,7 @@ class MatchProcessor:
             logger.info(f"    League: {match['competition']} (P:{match['league_priority']})")
             logger.info(f"    Started: {start_time.strftime('%H:%M')} ({minutes_from_start:.0f}m ago)")
             logger.info(f"    Status: {match['status_type']} -> {match['status']}")
+            logger.info(f"    ID: {match['id']}")
             
             if match["minute"]:
                 logger.info(f"    ✅ Minute: {match['minute']}' (SofaScore calculated)")
