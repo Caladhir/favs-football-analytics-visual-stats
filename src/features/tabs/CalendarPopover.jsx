@@ -1,8 +1,24 @@
-// src/components/CalendarPopover.jsx - FIKSIRAN TIMEZONE PROBLEM
+// src/components/CalendarPopover.jsx
 import { useState, useRef, useEffect } from "react";
 import { DayPicker } from "react-day-picker";
 import { format } from "date-fns";
 import { ChevronLeft, ChevronRight, Calendar } from "lucide-react";
+
+// 🔧 HELPER: Stvori lokalni datum bez timezone problema
+function createLocalDate(year, month, day) {
+  const date = new Date();
+  date.setFullYear(year, month, day);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+// 🔧 HELPER: Dobij lokalni datum string za usporedbu
+function getLocalDateString(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 export default function CalendarPopover({ date, setDate }) {
   const [open, setOpen] = useState(false);
@@ -37,24 +53,31 @@ export default function CalendarPopover({ date, setDate }) {
     }
   }, [open]);
 
-  // 🔧 FIKSIRANA: Promjena datuma s lokalnim vremenom
+  // 🔧 ISPRAVLJENA: Promjena datuma s lokalnim vremenom
   const handleChange = (offset) => {
     setDate((prev) => {
-      // Koristi lokalno vrijeme umjesto UTC
       const newDate = new Date(prev);
       newDate.setDate(newDate.getDate() + offset);
+      // Osiguraj da je vrijeme postavljeno na početak dana
+      newDate.setHours(0, 0, 0, 0);
+
+      console.log(`📅 Date change by ${offset}:`, {
+        from: getLocalDateString(prev),
+        to: getLocalDateString(newDate),
+        newDate: newDate,
+      });
+
       return newDate;
     });
   };
 
-  // 🔧 FIKSIRANA: Prikaz datuma s lokalnim vremenom
+  // 🔧 ISPRAVLJENA: Prikaz datuma s lokalnim vremenom
   const getDateDisplayText = () => {
-    // Koristi lokalne datume za usporedbu
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // Postavi na početak dana
+    today.setHours(0, 0, 0, 0);
 
     const selectedDate = new Date(date);
-    selectedDate.setHours(0, 0, 0, 0); // Postavi na početak dana
+    selectedDate.setHours(0, 0, 0, 0);
 
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
@@ -62,7 +85,7 @@ export default function CalendarPopover({ date, setDate }) {
     const tomorrow = new Date(today);
     tomorrow.setDate(today.getDate() + 1);
 
-    // Usporedi timestamp-ove
+    // Usporedi datume koristeći getTime()
     const selectedTime = selectedDate.getTime();
     const todayTime = today.getTime();
     const yesterdayTime = yesterday.getTime();
@@ -76,40 +99,50 @@ export default function CalendarPopover({ date, setDate }) {
     return format(date, "dd.MM.");
   };
 
-  // 🔧 NOVA: Funkcija za postavljanje datuma s lokalnim vremenom
+  // 🔧 ISPRAVLJENA: Funkcija za postavljanje datuma iz kalendara
   const handleDateSelect = (selected) => {
     if (selected) {
-      // Stvori novi Date objekt s lokalnim vremenom (ne UTC)
+      // Stvori novi Date objekt s lokalnim vremenom
       const localDate = new Date(selected);
-      localDate.setHours(0, 0, 0, 0); // Postavi na početak dana
-      console.log("📅 Selected date:", localDate);
+      localDate.setHours(0, 0, 0, 0);
+
+      console.log("📅 Calendar selected date:", {
+        selected: selected,
+        localDate: localDate,
+        dateString: getLocalDateString(localDate),
+      });
+
       setDate(localDate);
       setOpen(false);
     }
   };
 
-  // 🔧 NOVA: Today button s lokalnim vremenom
+  // 🔧 ISPRAVLJENA: Today button s lokalnim vremenom
   const handleTodayClick = () => {
     const today = new Date();
-    // Postavi na početak dana u lokalnom vremenu
     today.setHours(0, 0, 0, 0);
-    console.log("📅 Setting today date:", today);
+
+    console.log("📅 Setting today date:", {
+      today: today,
+      dateString: getLocalDateString(today),
+    });
+
     setDate(today);
     setOpen(false);
   };
 
   return (
     <div className="relative flex items-center justify-center gap-1 mt-6 mb-4">
-      {/* Prethodnji dan - vaš dizajn s Lucide ikonama */}
+      {/* Prethodnji dan */}
       <button
         onClick={() => handleChange(-1)}
-        className="group flex items-center justify-center w-12 h-12 rounded-xl bg-border hover:bg-primary/50 hover:scale-105 transition-all "
+        className="group flex items-center justify-center w-12 h-12 rounded-xl bg-border hover:bg-primary/50 hover:scale-105 transition-all"
         aria-label="Previous day"
       >
         <ChevronLeft className="w-6 h-6 text-primary group-hover:text-white transition-colors" />
       </button>
 
-      {/* Glavni datum button - vaš stil s gradijentom koji odgovara vašoj paleti */}
+      {/* Glavni datum button */}
       <button
         onClick={() => setOpen(!open)}
         className="relative flex items-center gap-3 px-6 py-3 bg-gradient-to-b from-primary/80 to-accent/40 hover:from-primary hover:to-accent/80 text-foreground font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105 min-w-[200px] justify-center"
@@ -121,9 +154,10 @@ export default function CalendarPopover({ date, setDate }) {
         </div>
       </button>
 
+      {/* Sljedeći dan */}
       <button
         onClick={() => handleChange(1)}
-        className="group flex items-center justify-center w-12 h-12 rounded-xl bg-border hover:bg-primary/50 hover:scale-105 transition-all "
+        className="group flex items-center justify-center w-12 h-12 rounded-xl bg-border hover:bg-primary/50 hover:scale-105 transition-all"
         aria-label="Next day"
       >
         <ChevronRight className="w-6 h-6 text-primary group-hover:text-white transition-colors" />
@@ -147,7 +181,7 @@ export default function CalendarPopover({ date, setDate }) {
           <DayPicker
             mode="single"
             selected={date}
-            onSelect={handleDateSelect} // 🔧 Koristi novu funkciju
+            onSelect={handleDateSelect}
             weekStartsOn={1}
             showOutsideDays
             modifiersClassNames={{
@@ -157,7 +191,7 @@ export default function CalendarPopover({ date, setDate }) {
           />
 
           <button
-            onClick={handleTodayClick} // 🔧 Koristi novu funkciju
+            onClick={handleTodayClick}
             className="block w-1/2 mx-auto text-center mt-3 bg-primary hover:bg-accent text-primary-foreground font-semibold py-1 rounded transition-colors duration-200"
           >
             TODAY

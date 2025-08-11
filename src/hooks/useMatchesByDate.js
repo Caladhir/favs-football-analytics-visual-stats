@@ -1,4 +1,4 @@
-// src/hooks/useMatchesByDate.js - ISPRAVLJEN za sprječavanje AbortError-a
+// src/hooks/useMatchesByDate.js - ISPRAVLJEN timezone handling
 import { useState, useEffect, useCallback, useRef } from "react";
 import supabase from "../services/supabase";
 
@@ -6,9 +6,13 @@ import supabase from "../services/supabase";
 const matchesCache = new Map();
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minuta
 
-// Cache utilities
+// 🔧 ISPRAVLJENA: Cache utilities s boljim date handling
 const getCacheKey = (date) => {
-  return date.toISOString().split("T")[0];
+  // Koristi lokalni datum umjesto ISO string
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
 
 const isCacheValid = (timestamp) => {
@@ -22,7 +26,6 @@ export default function useMatchesByDate(selectedDate, options = {}) {
   const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
-  // 🔧 ISPRAVKA: Jedan AbortController per hook instance
   const abortControllerRef = useRef();
   const lastRequestIdRef = useRef(0);
   const isFirstLoadRef = useRef(true);
@@ -51,25 +54,21 @@ export default function useMatchesByDate(selectedDate, options = {}) {
     console.log(`💾 Cached ${data.length} matches for ${cacheKey}`);
   }, []);
 
-  // 🔧 POBOLJŠANO: Fetch function s boljim error handling
+  // 🔧 ISPRAVLJENA: Fetch function s pravilnim date handling
   const fetchMatches = useCallback(
     async (date, isBackgroundRefresh = false) => {
       if (!enabled || !date) return;
 
-      // 🔧 VAŽNO: Increment request ID za tracking
       const requestId = ++lastRequestIdRef.current;
 
-      // Cancel any ongoing request samo ako je novi request
       if (abortControllerRef.current && !isBackgroundRefresh) {
         abortControllerRef.current.abort();
       }
 
-      // Create new abort controller
       abortControllerRef.current = new AbortController();
       const currentController = abortControllerRef.current;
 
       try {
-        // 🔧 OPTIMIZACIJA: Check cache first
         const cachedData = getCachedMatches(date);
         if (cachedData && !isBackgroundRefresh) {
           console.log(`✅ Cache hit for ${getCacheKey(date)}`);
@@ -79,7 +78,6 @@ export default function useMatchesByDate(selectedDate, options = {}) {
           return cachedData;
         }
 
-        // Samo postavi loading za first load ili ako nema cache
         if (!isBackgroundRefresh && (isFirstLoadRef.current || !cachedData)) {
           setLoading(true);
           isFirstLoadRef.current = false;
@@ -89,14 +87,25 @@ export default function useMatchesByDate(selectedDate, options = {}) {
 
         setError(null);
 
-        // Format date for SQL query
-        const dateStr = date.toISOString().split("T")[0];
+        // 🔧 ISPRAVKA: Pravilno formatiranje datuma za SQL query
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        const dateStr = `${year}-${month}-${day}`;
+
+        // Sljedeći dan
         const nextDay = new Date(date);
         nextDay.setDate(nextDay.getDate() + 1);
-        const nextDayStr = nextDay.toISOString().split("T")[0];
+        const nextYear = nextDay.getFullYear();
+        const nextMonth = String(nextDay.getMonth() + 1).padStart(2, "0");
+        const nextDayNum = String(nextDay.getDate()).padStart(2, "0");
+        const nextDayStr = `${nextYear}-${nextMonth}-${nextDayNum}`;
 
         console.log(
           `🔍 Fetching matches for ${dateStr} (request #${requestId})`
+        );
+        console.log(
+          `📅 Date range: ${dateStr}T00:00:00 to ${nextDayStr}T00:00:00`
         );
 
         const { data, error: fetchError } = await supabase
@@ -114,7 +123,6 @@ export default function useMatchesByDate(selectedDate, options = {}) {
           .order("start_time", { ascending: true })
           .abortSignal(currentController.signal);
 
-        // 🔧 PROVJERI: Je li ovo još uvijek latest request?
         if (requestId !== lastRequestIdRef.current) {
           console.log(`⚠️ Request ${requestId} outdated, ignoring results`);
           return;
@@ -136,7 +144,6 @@ export default function useMatchesByDate(selectedDate, options = {}) {
 
         return matchesData;
       } catch (err) {
-        // 🔧 POBOLJŠANO: Ignoriraj abort errors ako nije latest request
         if (err.name === "AbortError" || err.code === "20") {
           console.log(
             `🚫 Request ${requestId} aborted (newer request in progress)`
@@ -144,7 +151,6 @@ export default function useMatchesByDate(selectedDate, options = {}) {
           return;
         }
 
-        // 🔧 PROVJERI: Je li ovo još uvijek latest request?
         if (requestId !== lastRequestIdRef.current) {
           console.log(`⚠️ Request ${requestId} error ignored (outdated)`);
           return;
@@ -156,7 +162,6 @@ export default function useMatchesByDate(selectedDate, options = {}) {
         );
         setError(err.message);
 
-        // Fallback to cache
         const cachedData = getCachedMatches(date);
         if (cachedData) {
           console.log(
@@ -167,7 +172,6 @@ export default function useMatchesByDate(selectedDate, options = {}) {
           setMatches([]);
         }
       } finally {
-        // 🔧 PROVJERI: Postavi loading states samo za latest request
         if (requestId === lastRequestIdRef.current) {
           setLoading(false);
           setBackgroundRefreshing(false);
@@ -183,7 +187,7 @@ export default function useMatchesByDate(selectedDate, options = {}) {
     return fetchMatches(selectedDate, true);
   }, [fetchMatches, selectedDate]);
 
-  // 🔧 OPTIMIZIRANO: Initial fetch + when date changes
+  // Initial fetch + when date changes
   useEffect(() => {
     if (selectedDate && enabled) {
       const dateKey = getCacheKey(selectedDate);
@@ -211,13 +215,12 @@ export default function useMatchesByDate(selectedDate, options = {}) {
   };
 }
 
-// 🔧 UTILITY: Clear cache (za debugging)
+// Utility functions
 export const clearMatchesCache = () => {
   matchesCache.clear();
   console.log("🗑️ Matches cache cleared");
 };
 
-// 🔧 UTILITY: Get cache stats
 export const getCacheStats = () => {
   const stats = {
     size: matchesCache.size,
