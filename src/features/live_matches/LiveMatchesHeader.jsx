@@ -12,7 +12,7 @@ export default function LiveMatchesHeader({
         ></div>
         📺 {matchCount} Live {matchCount === 1 ? "Match" : "Matches"}
         {backgroundRefreshing && (
-          <span className="ml-2 text-xs opacity-75">Updating...</span>
+          <span className="ml-2 text-xs opacity-75">...</span>
         )}
       </div>
     </div>

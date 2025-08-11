@@ -1,3 +1,4 @@
+// src/hooks/useLiveMatches.js - POBOLJŠANI REFRESH TIMING
 import { useState, useEffect, useCallback, useRef } from "react";
 import supabase from "../services/supabase";
 import { getValidLiveMatchesStrict } from "../utils/liveMatchFilters";
@@ -21,7 +22,7 @@ export function useLiveMatches(autoFetch = true) {
 
   const applyStrict = useCallback((rows) => {
     return getValidLiveMatchesStrict(rows, {
-      staleCutoffSec: 240,
+      staleCutoffSec: 300, // 🔧 POVEĆANO s 240s na 300s (5 min)
       maxAgeHours: 3,
       htCutoffSec: 1200,
     });
@@ -55,7 +56,9 @@ export function useLiveMatches(autoFetch = true) {
 
         if (import.meta.env.DEV) {
           console.log(
-            `🔴 Live fetched: ${strict.length}/${(data || []).length}`
+            `🔴 Live fetched: ${strict.length}/${
+              (data || []).length
+            } (${new Date().toLocaleTimeString()})`
           );
         }
       } catch (e) {
@@ -78,14 +81,21 @@ export function useLiveMatches(autoFetch = true) {
     fetchLiveMatches(false);
 
     const onVis = () => {
-      if (document.visibilityState === "visible") fetchLiveMatches(true);
+      if (document.visibilityState === "visible") {
+        console.log("🔄 Window focused - refreshing live matches");
+        fetchLiveMatches(true);
+      }
     };
     window.addEventListener("visibilitychange", onVis);
     return () => window.removeEventListener("visibilitychange", onVis);
   }, [autoFetch, fetchLiveMatches]);
 
-  // Auto-refresh svakih 15s dok ima live
-  useAutoRefresh(matches, () => fetchLiveMatches(true), 15000);
+  // 🚀 POBOLJŠANO: Vrlo brži auto-refresh za bolju sinkronizaciju
+  useAutoRefresh(
+    matches,
+    () => fetchLiveMatches(true),
+    3000 // 🔧 DRASTIČNO SMANJENO na 3s za ultra-brzu sinkronizaciju
+  );
 
   // Realtime: slušaj SVE promjene pa lokalno odluči zadržati/izbaciti
   useEffect(() => {
@@ -115,11 +125,19 @@ export function useLiveMatches(autoFetch = true) {
               if (idx === -1) return prev;
               const copy = [...prev];
               copy.splice(idx, 1);
+              console.log(
+                `🔄 Realtime: Removed ${row.home_team} vs ${row.away_team} from live`
+              );
               return copy;
             }
 
             // live i ne postoji -> dodaj
-            if (idx === -1) return [row, ...applyStrict(prev)];
+            if (idx === -1) {
+              console.log(
+                `🔄 Realtime: Added ${row.home_team} vs ${row.away_team} to live`
+              );
+              return [row, ...applyStrict(prev)];
+            }
 
             // update postojećeg
             const copy = [...prev];
@@ -135,11 +153,19 @@ export function useLiveMatches(autoFetch = true) {
     };
   }, [autoFetch, applyStrict]);
 
-  // Lokalno “čišćenje” svakih 8s (za slučaj propuštenih eventa)
+  // 🚀 POBOLJŠANO: Češće lokalno čišćenje
   useEffect(() => {
     const id = setInterval(() => {
-      setMatches((prev) => applyStrict(prev));
-    }, 8000);
+      setMatches((prev) => {
+        const cleaned = applyStrict(prev);
+        if (cleaned.length !== prev.length) {
+          console.log(
+            `🧹 Local cleanup: ${prev.length} -> ${cleaned.length} live matches`
+          );
+        }
+        return cleaned;
+      });
+    }, 6000); // 🔧 SMANJENO s 8s na 6s
     return () => clearInterval(id);
   }, [applyStrict]);
 

@@ -167,7 +167,7 @@ export default function MatchCard({ match }) {
                 <span className="truncate max-w-32">{match.venue}</span>
               </div>
             )}
-            {/* {renderDebugInfo()} */}
+            {renderDebugInfo()}
           </div>
         </div>
       </Link>

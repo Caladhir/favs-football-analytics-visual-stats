@@ -1,5 +1,5 @@
-// src/features/tabs/LiveMatches.jsx
-import React, { useState, useEffect, useMemo } from "react";
+// src/features/tabs/LiveMatches.jsx - FORCE REFRESH ON COUNT CHANGE
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useLiveMatches } from "../../hooks/useLiveMatches";
 import {
   sortMatches,
@@ -20,14 +20,33 @@ export default function LiveMatches() {
   const [, setCurrentTime] = useState(new Date());
   const [groupByCompetition, setGroupByCompetition] = useState(true);
 
+  // 🚀 NOVO: Prati prethodnji broj za force refresh
+  const prevCountRef = useRef(0);
+
   const userPreferences = useUserPreferences();
 
   const { matches, loading, backgroundRefreshing, error, fetchLiveMatches } =
-    useLiveMatches(false);
+    useLiveMatches();
 
-  React.useEffect(() => {
-    fetchLiveMatches(false);
-  }, [fetchLiveMatches]);
+  // 🚀 NOVO: Force refresh ako se broj drastično promijeni
+  useEffect(() => {
+    const currentCount = matches.length;
+    const prevCount = prevCountRef.current;
+
+    // Ako se broj promijenio za 2 ili više, napravi force refresh
+    if (prevCount > 0 && Math.abs(currentCount - prevCount) >= 2) {
+      console.log(
+        `🚨 [FORCE REFRESH] Count changed: ${prevCount} → ${currentCount}`
+      );
+
+      // Čekaj malo pa refresh
+      setTimeout(() => {
+        fetchLiveMatches(true);
+      }, 1000);
+    }
+
+    prevCountRef.current = currentCount;
+  }, [matches.length, fetchLiveMatches]);
 
   const sortedMatches = useMemo(() => {
     if (!matches || matches.length === 0) return [];

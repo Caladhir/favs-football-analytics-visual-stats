@@ -1,4 +1,4 @@
-// src/utils/matchStatusUtils.js
+// src/utils/matchStatusUtils.js - ISPRAVKA ZA PRODUŽETKE
 import { DISPLAY_BACKEND_FRESH_SEC, LIVE_STALE_SEC } from "../services/live";
 import {
   getValidLiveMatches,
@@ -91,6 +91,7 @@ function fmt(m) {
   return `${m}'`;
 }
 
+// 🚀 ISPRAVKA: Bolja logika za produžetke
 export function calculateRealTimeMinute(match, now = new Date()) {
   const status = validateLiveStatus(match);
   if (status !== "live" && status !== "ht") return null;
@@ -99,28 +100,69 @@ export function calculateRealTimeMinute(match, now = new Date()) {
   const start = parseStart(match.start_time);
   if (Number.isNaN(start)) return null;
 
+  const fromStart = Math.floor((now - start) / 60000);
+
+  // 🚀 GLAVNA ISPRAVKA: Provjeri da li backend minuta pokazuje produžetke
+  const hasBackendExtraTime = hasValidBackendMinute(match) && match.minute > 90;
+
   const cps = match.current_period_start
     ? new Date(match.current_period_start * 1000)
     : null;
-  const fromStart = Math.floor((now - start) / 60000);
 
   if (cps && !Number.isNaN(cps)) {
     const fromPeriod = Math.floor((now - cps) / 60000);
+
+    // Prvi poluvrijeme (0-45')
     if (fromStart <= 50) return `${Math.max(1, Math.min(fromPeriod, 45))}'`;
+
+    // Poluvrijeme (45-60')
     if (fromStart <= 60) return "45+";
-    if (fromStart <= 105)
-      return fmt(Math.min(45 + Math.max(1, fromPeriod), 90));
-    if (fromStart <= 120)
+
+    // Drugo poluvrijeme (60-105') - ALI bez produžetaka osim ako backend ne kaže drugačije
+    if (fromStart <= 105) {
+      const secondHalfMinute = Math.min(45 + Math.max(1, fromPeriod), 90);
+
+      // 🚀 NOVA LOGIKA: Ako nema backend produžetaka, zaustavi na 90+
+      if (secondHalfMinute >= 90 && !hasBackendExtraTime) {
+        return "90+";
+      }
+
+      return fmt(secondHalfMinute);
+    }
+
+    // Produžeci (105-120') - SAMO ako backend potvrđuje
+    if (fromStart <= 120 && hasBackendExtraTime) {
       return `${Math.min(90 + Math.max(1, fromPeriod), 120)}' (ET)`;
-    return "90+";
+    }
+
+    // Fallback
+    return hasBackendExtraTime ? "90+ (ET)" : "90+";
   }
 
+  // Bez current_period_start - jednostavnija logika
   if (fromStart < 0) return "1'";
   if (fromStart <= 45) return `${Math.max(1, fromStart)}'`;
   if (fromStart <= 60) return "45+";
-  if (fromStart <= 105) return fmt(45 + (fromStart - 60));
-  if (fromStart <= 120) return `${90 + (fromStart - 105)}' (ET)`;
-  return "90+";
+
+  // 🚀 KLJUČNA PROMJENA: Drugo poluvrijeme bez automatskih produžetaka
+  if (fromStart <= 105) {
+    const minute = 45 + (fromStart - 60);
+
+    // Ako je preko 90', provjeri backend
+    if (minute >= 90 && !hasBackendExtraTime) {
+      return "90+";
+    }
+
+    return fmt(minute);
+  }
+
+  // Produžeci SAMO ako backend potvrđuje
+  if (fromStart <= 120 && hasBackendExtraTime) {
+    return `${90 + (fromStart - 105)}' (ET)`;
+  }
+
+  // Default fallback
+  return hasBackendExtraTime ? "90+ (ET)" : "90+";
 }
 
 export function calculateDisplayMinute(match) {
@@ -132,9 +174,17 @@ export function calculateDisplayMinute(match) {
     Date.now() - new Date(match.updated_at).getTime() <=
       DISPLAY_BACKEND_FRESH_SEC * 1000;
 
-  if (hasValidBackendMinute(match) && fresh) return fmt(match.minute);
+  // 🚀 POBOLJŠANJE: Uvijek prioritiziraj real-time, backend samo za pohranu
   if (s === "ht") return "45'";
-  return calculateRealTimeMinute(match);
+
+  const realTimeMinute = calculateRealTimeMinute(match);
+
+  // Koristi backend samo ako je svjež I ako real-time nije dostupan
+  if (hasValidBackendMinute(match) && fresh && !realTimeMinute) {
+    return fmt(match.minute);
+  }
+
+  return realTimeMinute;
 }
 
 // --- debug helpers ---
@@ -162,7 +212,11 @@ export function analyzeMatchStatus(match) {
     validatedStatus,
     hoursElapsed,
     minute: { backend, realtime, diffBackendVsRealtime: diff },
-    possibleIssues: { stale: !!isStale, veryOld: Number(hoursElapsed) > 2 },
+    possibleIssues: {
+      stale: !!isStale,
+      veryOld: Number(hoursElapsed) > 2,
+      hasBackendExtraTime: hasValidBackendMinute(match) && match.minute > 90,
+    },
     statusChanged:
       (match.status || match.status_type || "").toLowerCase() !==
       validatedStatus,
