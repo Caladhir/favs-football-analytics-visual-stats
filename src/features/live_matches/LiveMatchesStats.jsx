@@ -33,6 +33,7 @@ export default function LiveMatchesStats({
           size="sm"
           groupedText="Grouped"
           ungroupedText="Group"
+          variant="minimal"
         />
       </div>
     </div>

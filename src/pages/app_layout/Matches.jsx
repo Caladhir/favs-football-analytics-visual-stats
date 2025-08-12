@@ -192,7 +192,7 @@ export default function Matches() {
       </div>
 
       {import.meta.env.DEV && (
-        <div className="fixed top-4 right-4 bg-black text-white p-3 rounded text-xs z-50">
+        <div className="fixed top-13 right-4 bg-black text-white p-3 rounded text-xs z-50">
           <div className="font-bold mb-2">🔴 Live Debug</div>
           <div>Tab: {tab}</div>
           <div>Live Count: {liveMatchesCount}</div>

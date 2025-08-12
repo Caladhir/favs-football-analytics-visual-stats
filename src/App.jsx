@@ -7,7 +7,11 @@ import AppLayout from "./ui/AppLayout";
 import HomePage from "./pages/app_layout/HomePage";
 import Dashboard from "./pages/app_layout/Dashboard";
 import Matches from "./pages/app_layout/Matches";
+import Players from "./pages/app_layout/Players";
+import Teams from "./pages/app_layout/Teams";
+
 import MatchPage from "./pages/app_layout/MatchPage";
+
 import NotFound from "./pages/NotFound";
 import ScrollToTop from "./ui/ScrollToTop";
 
@@ -23,6 +27,8 @@ export default function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="matches/*" element={<Matches />} />
             <Route path="match/:id" element={<MatchPage />} />
+            <Route path="players" element={<Players />} />
+            <Route path="teams" element={<Teams />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

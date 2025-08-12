@@ -1,54 +1,54 @@
-// src/components/AllMatches/AllMatchesDebug.jsx - S LIVE COUNT PROP
-import React from "react";
-import { findProblemMatches } from "../../utils/matchStatusUtils";
-
+// src/features/all_matches/AllMatchesDebug.jsx - UPDATED FOR NEW STRUCTURE
 export default function AllMatchesDebug({
   matches,
   sortedMatches,
   userPreferences,
   backgroundRefreshing,
-  liveMatchesCount = 0, // 🔧 DODANO kao prop
+  stats,
 }) {
   if (!import.meta.env.DEV) return null;
-
-  const problemMatches = findProblemMatches(matches);
-  const topLeaguesCount = sortedMatches.filter((match) =>
-    [
-      "Premier League",
-      "La Liga",
-      "Serie A",
-      "Bundesliga",
-      "Ligue 1",
-      "UEFA Champions League",
-    ].includes(match.competition)
-  ).length;
-
-  const favoritesCount = sortedMatches.filter((m) =>
-    userPreferences.favoriteTeams.some(
-      (t) =>
-        t.toLowerCase() === m.home_team?.toLowerCase() ||
-        t.toLowerCase() === m.away_team?.toLowerCase()
-    )
-  ).length;
 
   return (
     <div className="mt-6 p-3 bg-gray-800 rounded text-xs text-center max-w-4xl mx-auto space-y-1">
       <div className="text-gray-400">
-        Debug: {matches.length} total • {sortedMatches.length} sorted •{" "}
-        {liveMatchesCount} live • {problemMatches.length} problems
+        All Matches Debug: {matches?.length || 0} raw •{" "}
+        {sortedMatches?.length || 0} sorted
       </div>
-      <div className="text-blue-400">
-        Top leagues: {topLeaguesCount} • Favorites: {favoritesCount}
-      </div>
-      {liveMatchesCount > 0 && (
-        <div
-          className={`${
-            backgroundRefreshing ? "text-yellow-400" : "text-green-400"
-          }`}
-        >
-          Auto-refresh: ON (30s) {backgroundRefreshing && "- Refreshing..."}
+
+      {stats && (
+        <div className="text-blue-400">
+          📊 Status Breakdown: {stats.live} live • {stats.upcoming} upcoming •{" "}
+          {stats.finished} finished
         </div>
       )}
+
+      {stats && (
+        <div className="text-green-400">
+          🎯 Quality: {stats.topLeagues} top leagues • {stats.favorites}{" "}
+          favorites
+        </div>
+      )}
+
+      <div className="text-cyan-400">
+        ✅ Using enhanced deduplication and smart sorting
+      </div>
+
+      <div className="text-purple-400">
+        🔧 User Prefs: {userPreferences?.favoriteTeams?.length || 0} teams •{" "}
+        {userPreferences?.favoriteLeagues?.length || 0} leagues
+      </div>
+
+      <div
+        className={`${
+          backgroundRefreshing ? "text-yellow-400" : "text-green-400"
+        }`}
+      >
+        Auto-refresh: {backgroundRefreshing ? "ON (refreshing...)" : "ON (30s)"}
+      </div>
+
+      <div className="text-gray-500 text-[10px] mt-2">
+        Last refresh: {new Date().toLocaleTimeString()}
+      </div>
     </div>
   );
 }
