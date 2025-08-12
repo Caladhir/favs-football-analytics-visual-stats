@@ -1,4 +1,4 @@
-// src/utils/matchStatusUtils.js - ISPRAVKA ZA PRODUŽETKE
+// src/utils/matchStatusUtils.js - OPTIMIZED: Manje console logova
 import { DISPLAY_BACKEND_FRESH_SEC, LIVE_STALE_SEC } from "../services/live";
 import {
   getValidLiveMatches,
@@ -6,6 +6,10 @@ import {
 } from "./liveMatchFilters";
 
 const LIVE_SET = new Set(["live", "ht", "inprogress", "halftime"]);
+
+// 🔧 CACHE za minute calculation da sprečimo ponavljanje
+const minuteCache = new Map();
+const CACHE_DURATION = 5000; // 5 sekundi cache
 
 function parseStart(st) {
   if (typeof st === "number") return new Date(st < 1e12 ? st * 1000 : st);
@@ -85,106 +89,148 @@ export function hasValidBackendMinute(match) {
   );
 }
 
-function fmt(m) {
-  if (m >= 105 && m <= 120) return `${m}' (ET)`;
-  if (m >= 90) return `${m}'+`;
-  return `${m}'`;
+// 🔧 NOVA FUNKCIJA: Provjeri je li backend minuta svježa
+export function isBackendMinuteFresh(
+  match,
+  maxAgeSeconds = DISPLAY_BACKEND_FRESH_SEC
+) {
+  if (!match.updated_at) return false;
+
+  const lastUpdate = new Date(match.updated_at).getTime();
+  const now = Date.now();
+  const ageSeconds = (now - lastUpdate) / 1000;
+
+  return ageSeconds <= maxAgeSeconds;
 }
 
-// 🚀 ISPRAVKA: Bolja logika za produžetke
-export function calculateRealTimeMinute(match, now = new Date()) {
-  const status = validateLiveStatus(match);
-  if (status !== "live" && status !== "ht") return null;
-  if (status === "ht") return "45'";
-
-  const start = parseStart(match.start_time);
-  if (Number.isNaN(start)) return null;
-
-  const fromStart = Math.floor((now - start) / 60000);
-
-  // 🚀 GLAVNA ISPRAVKA: Provjeri da li backend minuta pokazuje produžetke
-  const hasBackendExtraTime = hasValidBackendMinute(match) && match.minute > 90;
-
-  const cps = match.current_period_start
-    ? new Date(match.current_period_start * 1000)
-    : null;
-
-  if (cps && !Number.isNaN(cps)) {
-    const fromPeriod = Math.floor((now - cps) / 60000);
-
-    // Prvi poluvrijeme (0-45')
-    if (fromStart <= 50) return `${Math.max(1, Math.min(fromPeriod, 45))}'`;
-
-    // Poluvrijeme (45-60')
-    if (fromStart <= 60) return "45+";
-
-    // Drugo poluvrijeme (60-105') - ALI bez produžetaka osim ako backend ne kaže drugačije
-    if (fromStart <= 105) {
-      const secondHalfMinute = Math.min(45 + Math.max(1, fromPeriod), 90);
-
-      // 🚀 NOVA LOGIKA: Ako nema backend produžetaka, zaustavi na 90+
-      if (secondHalfMinute >= 90 && !hasBackendExtraTime) {
-        return "90+";
-      }
-
-      return fmt(secondHalfMinute);
-    }
-
-    // Produžeci (105-120') - SAMO ako backend potvrđuje
-    if (fromStart <= 120 && hasBackendExtraTime) {
-      return `${Math.min(90 + Math.max(1, fromPeriod), 120)}' (ET)`;
-    }
-
-    // Fallback
-    return hasBackendExtraTime ? "90+ (ET)" : "90+";
-  }
-
-  // Bez current_period_start - jednostavnija logika
-  if (fromStart < 0) return "1'";
-  if (fromStart <= 45) return `${Math.max(1, fromStart)}'`;
-  if (fromStart <= 60) return "45+";
-
-  // 🚀 KLJUČNA PROMJENA: Drugo poluvrijeme bez automatskih produžetaka
-  if (fromStart <= 105) {
-    const minute = 45 + (fromStart - 60);
-
-    // Ako je preko 90', provjeri backend
-    if (minute >= 90 && !hasBackendExtraTime) {
-      return "90+";
-    }
-
-    return fmt(minute);
-  }
-
-  // Produžeci SAMO ako backend potvrđuje
-  if (fromStart <= 120 && hasBackendExtraTime) {
-    return `${90 + (fromStart - 105)}' (ET)`;
-  }
-
-  // Default fallback
-  return hasBackendExtraTime ? "90+ (ET)" : "90+";
+function formatMinute(minute) {
+  if (minute <= 0) return "1'";
+  if (minute >= 105 && minute <= 120) return `${minute}' (ET)`;
+  if (minute >= 90) return `${minute}'+`;
+  return `${minute}'`;
 }
 
+// 🚀 OPTIMIZACIJA: Cache da sprečimo ponavljanja
+function getCacheKey(match) {
+  return `${match.id}-${match.updated_at}-${Math.floor(Date.now() / 5000)}`;
+}
+
+// 🚀 POTPUNO NOVA LOGIKA: Jednostavna i pouzdana s CACHE
 export function calculateDisplayMinute(match) {
-  const s = validateLiveStatus(match);
-  if (s !== "live" && s !== "ht") return null;
+  const status = validateLiveStatus(match);
 
-  const fresh =
-    match.updated_at &&
-    Date.now() - new Date(match.updated_at).getTime() <=
-      DISPLAY_BACKEND_FRESH_SEC * 1000;
-
-  // 🚀 POBOLJŠANJE: Uvijek prioritiziraj real-time, backend samo za pohranu
-  if (s === "ht") return "45'";
-
-  const realTimeMinute = calculateRealTimeMinute(match);
-
-  // Koristi backend samo ako je svjež I ako real-time nije dostupan
-  if (hasValidBackendMinute(match) && fresh && !realTimeMinute) {
-    return fmt(match.minute);
+  // Samo za live utakmice
+  if (status !== "live") {
+    return status === "ht" ? "HT" : null;
   }
 
-  return realTimeMinute;
+  // 🔧 PROVJERI CACHE prvo
+  const cacheKey = getCacheKey(match);
+  if (minuteCache.has(cacheKey)) {
+    return minuteCache.get(cacheKey);
+  }
+
+  let result;
+
+  // 🎯 PRIORITET 1: Backend minuta (ako je svježa i valjana)
+  if (hasValidBackendMinute(match) && isBackendMinuteFresh(match)) {
+    result = formatMinute(match.minute);
+
+    // 🔧 SMANJENO LOGIRANJE - samo povremeno
+    if (Math.random() < 0.1) {
+      // 10% šanse za log
+      console.log(
+        `✅ Using fresh backend minute: ${match.minute}' for ${match.home_team} vs ${match.away_team}`
+      );
+    }
+  } else {
+    // 🎯 PRIORITET 2: Real-time kalkulacija (jednostavna)
+    const realTimeMinute = calculateSimpleRealTime(match);
+    if (realTimeMinute) {
+      result = realTimeMinute;
+
+      if (Math.random() < 0.05) {
+        // 5% šanse za log
+        console.log(
+          `⏰ Using real-time calculation: ${realTimeMinute} for ${match.home_team} vs ${match.away_team}`
+        );
+      }
+    } else if (hasValidBackendMinute(match)) {
+      // 🎯 PRIORITET 3: Backup - zastarjela backend minuta
+      result = formatMinute(match.minute);
+
+      if (Math.random() < 0.05) {
+        console.log(
+          `⚠️ Using stale backend minute: ${match.minute}' for ${match.home_team} vs ${match.away_team}`
+        );
+      }
+    } else {
+      // 🎯 FALLBACK: Generični LIVE indicator
+      result = "LIVE";
+
+      if (Math.random() < 0.02) {
+        // 2% šanse za log
+        console.log(
+          `❌ No minute data available for ${match.home_team} vs ${match.away_team}, using LIVE`
+        );
+      }
+    }
+  }
+
+  // 🔧 CACHE rezultat
+  minuteCache.set(cacheKey, result);
+
+  // 🔧 CLEANUP starih cache unosa
+  if (minuteCache.size > 100) {
+    const oldEntries = Array.from(minuteCache.keys()).slice(0, 50);
+    oldEntries.forEach((key) => minuteCache.delete(key));
+  }
+
+  return result;
+}
+
+// 🔧 NOVA FUNKCIJA: Jednostavna real-time kalkulacija
+function calculateSimpleRealTime(match) {
+  try {
+    const start = parseStart(match.start_time);
+    if (Number.isNaN(start)) return null;
+
+    const now = new Date();
+    const minutesElapsed = Math.floor((now - start) / 60000);
+
+    // Provjere osnovnih granica
+    if (minutesElapsed < 0) return "1'";
+    if (minutesElapsed > 150) return "90+"; // Preko 2.5h = vjerojatno greška
+
+    // Jednostavna logika po vremenskim okvirima
+    if (minutesElapsed <= 45) {
+      // Prvi poluvrijeme (1-45')
+      return `${Math.max(1, minutesElapsed)}'`;
+    }
+
+    if (minutesElapsed <= 60) {
+      // Poluvrijeme/pauza (45-60')
+      return "45+"; // Ili vraćaj "HT" ovisno o preferenci
+    }
+
+    if (minutesElapsed <= 105) {
+      // Drugi poluvrijeme (60-105' = 46'-90' match time)
+      const secondHalfMinute = 45 + (minutesElapsed - 60);
+      return formatMinute(Math.min(secondHalfMinute, 90));
+    }
+
+    // Produžeci ili greška (preko 105')
+    return "90+";
+  } catch (error) {
+    console.warn(`Error calculating real-time minute:`, error);
+    return null;
+  }
+}
+
+// 🔧 POBOLJŠANA: calculateRealTimeMinute - sada samo za debug
+export function calculateRealTimeMinute(match, now = new Date()) {
+  // Ova funkcija se zadržava za kompatibilnost, ali poziva novu logiku
+  return calculateSimpleRealTime(match);
 }
 
 // --- debug helpers ---
@@ -195,12 +241,20 @@ export function analyzeMatchStatus(match) {
     ? ((now - start) / 36e5).toFixed(1)
     : "n/a";
   const validatedStatus = validateLiveStatus(match);
-  const realtime = calculateRealTimeMinute(match);
-  const backend = hasValidBackendMinute(match) ? `${match.minute}'` : null;
 
-  let diff = null;
-  if (backend && realtime && /^\d+/.test(realtime)) {
-    diff = Math.abs(parseInt(backend, 10) - parseInt(realtime, 10));
+  // Debug informacije o minutama
+  const backendMinute = hasValidBackendMinute(match)
+    ? `${match.minute}'`
+    : null;
+  const backendFresh = isBackendMinuteFresh(match);
+  const realTimeMinute = calculateSimpleRealTime(match);
+  const displayMinute = calculateDisplayMinute(match);
+
+  let minuteDiff = null;
+  if (backendMinute && realTimeMinute && /^\d+/.test(realTimeMinute)) {
+    minuteDiff = Math.abs(
+      parseInt(backendMinute, 10) - parseInt(realTimeMinute, 10)
+    );
   }
 
   const isStale =
@@ -211,11 +265,17 @@ export function analyzeMatchStatus(match) {
     originalStatus: match.status || match.status_type,
     validatedStatus,
     hoursElapsed,
-    minute: { backend, realtime, diffBackendVsRealtime: diff },
+    minute: {
+      backend: backendMinute,
+      backendFresh,
+      realtime: realTimeMinute,
+      display: displayMinute,
+      diffBackendVsRealtime: minuteDiff,
+    },
     possibleIssues: {
       stale: !!isStale,
       veryOld: Number(hoursElapsed) > 2,
-      hasBackendExtraTime: hasValidBackendMinute(match) && match.minute > 90,
+      noValidMinute: !backendMinute && !realTimeMinute,
     },
     statusChanged:
       (match.status || match.status_type || "").toLowerCase() !==
