@@ -164,17 +164,38 @@ class Config:
     
     # 🔧 STATUS MAPPING
     STATUS_MAPPING = {
-        "halftime": "ht",
-        "inprogress": "live",
-        "finished": "finished",
-        "afterextra": "finished",
-        "penalties": "finished",
-        "notstarted": "upcoming",
-        "postponed": "postponed",
-        "cancelled": "canceled",
-        "abandoned": "abandoned",
-        "suspended": "suspended"
-    }
+    # Live statuses
+    'inprogress': 'live',
+    'live': 'live',
+    
+    # Half-time 
+    'halftime': 'ht',
+    'ht': 'ht',
+    
+    # Finished
+    'finished': 'finished',
+    'ended': 'finished',
+    'ft': 'ft',  # Full time finished
+    'fulltime': 'ft',
+    
+    # Upcoming/Scheduled
+    'notstarted': 'upcoming',
+    'upcoming': 'upcoming',
+    'scheduled': 'upcoming',
+    
+    # Cancelled/Postponed
+    'cancelled': 'canceled',
+    'canceled': 'canceled',
+    'postponed': 'postponed',
+    'delayed': 'postponed',
+    
+    # Abandoned/Suspended
+    'abandoned': 'abandoned',
+    'suspended': 'suspended',  # ✅ ADDED: This was missing!
+    
+    # Default fallback
+    'unknown': 'upcoming'
+}
     
     # 🔧 LOGGING CONFIGURATION
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

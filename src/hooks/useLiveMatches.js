@@ -1,173 +1,167 @@
-// src/hooks/useLiveMatches.js - POBOLJŠANI REFRESH TIMING
-import { useState, useEffect, useCallback, useRef } from "react";
+// src/hooks/useLiveMatches.js
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import supabase from "../services/supabase";
-import { getValidLiveMatchesStrict } from "../utils/liveMatchFilters";
-import { useAutoRefresh } from "./useAutoRefresh";
 
-const LIVE_SET = new Set(["live", "ht", "inprogress", "halftime"]);
+const INTERVALS = {
+  ultra: 2000, // >50 live
+  fast: 5000, // 15–50 live
+  normal: 10000, // 1–14 live
+  idle: 20000, // 0 live
+};
 
-export function useLiveMatches(autoFetch = true) {
+export function useLiveMatches() {
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const mountedRef = useRef(true);
+  const [lastRefreshed, setLastRefreshed] = useState(null);
+  const [isRealtimeActive, setIsRealtimeActive] = useState(false);
 
+  const mountedRef = useRef(true);
+  const timerRef = useRef(null);
+  const lastRealtimeAtRef = useRef(0);
+
+  const liveCount = useMemo(() => matches.length, [matches]);
+
+  const pickInterval = (count) => {
+    if (count > 50) return INTERVALS.ultra;
+    if (count >= 15) return INTERVALS.fast;
+    if (count >= 1) return INTERVALS.normal;
+    return INTERVALS.idle;
+  };
+
+  const fetchOnce = useCallback(async (foreground = false) => {
+    if (!mountedRef.current) return;
+
+    foreground ? setLoading(true) : setBackgroundRefreshing(true);
+    setError(null);
+
+    try {
+      const fourMinAgo = new Date(Date.now() - 4 * 60 * 1000).toISOString();
+      const { data: rows, error: err } = await supabase
+        .from("matches")
+        .select(
+          "id,home_team,away_team,home_score,away_score,minute,status,competition,updated_at,start_time"
+        )
+        .in("status", ["live", "ht"])
+        .gte("updated_at", fourMinAgo)
+        .order("updated_at", { ascending: false });
+
+      if (!mountedRef.current) return;
+
+      if (err) {
+        setError(err.message || "Fetch error");
+        setMatches([]);
+      } else {
+        setMatches(rows ?? []);
+        setLastRefreshed(Date.now());
+      }
+    } catch (e) {
+      if (!mountedRef.current) return;
+      setError(e.message || "Network error");
+    } finally {
+      if (!mountedRef.current) return;
+      foreground ? setLoading(false) : setBackgroundRefreshing(false);
+    }
+  }, []);
+
+  const refreshNow = useCallback(() => fetchOnce(true), [fetchOnce]);
+
+  // ✅ Start initial load
   useEffect(() => {
     mountedRef.current = true;
+    fetchOnce(true);
     return () => {
       mountedRef.current = false;
     };
-  }, []);
+  }, [fetchOnce]);
 
-  const applyStrict = useCallback((rows) => {
-    return getValidLiveMatchesStrict(rows, {
-      staleCutoffSec: 300, // 🔧 POVEĆANO s 240s na 300s (5 min)
-      maxAgeHours: 3,
-      htCutoffSec: 1200,
-    });
-  }, []);
-
-  const fetchLiveMatches = useCallback(
-    async (bg = false) => {
-      try {
-        if (!mountedRef.current) return;
-        !bg ? setLoading(true) : setBackgroundRefreshing(true);
-        setError(null);
-
-        const { data, error: fetchError } = await supabase
-          .from("matches")
-          .select(
-            `
-          id, home_team, away_team, home_score, away_score, start_time,
-          status, status_type, competition, competition_id, season, round,
-          venue, minute, home_color, away_color, current_period_start,
-          source, updated_at
-        `
-          )
-          .in("status", Array.from(LIVE_SET))
-          .order("start_time", { ascending: false });
-
-        if (fetchError) throw fetchError;
-
-        const strict = applyStrict(data || []);
-        if (!mountedRef.current) return;
-        setMatches(strict);
-
-        if (import.meta.env.DEV) {
-          console.log(
-            `🔴 Live fetched: ${strict.length}/${
-              (data || []).length
-            } (${new Date().toLocaleTimeString()})`
-          );
-        }
-      } catch (e) {
-        if (!mountedRef.current) return;
-        console.error(e);
-        setError(e?.message || "Unknown error");
-        if (!bg) setMatches([]);
-      } finally {
-        if (!mountedRef.current) return;
-        setLoading(false);
-        setBackgroundRefreshing(false);
-      }
-    },
-    [applyStrict]
-  );
-
-  // Initial + na promjenu fokusa prozora
+  // ✅ Supabase realtime (insert/update/delete) + soft merge
   useEffect(() => {
-    if (!autoFetch) return;
-    fetchLiveMatches(false);
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") {
-        console.log("🔄 Window focused - refreshing live matches");
-        fetchLiveMatches(true);
-      }
-    };
-    window.addEventListener("visibilitychange", onVis);
-    return () => window.removeEventListener("visibilitychange", onVis);
-  }, [autoFetch, fetchLiveMatches]);
-
-  // 🚀 POBOLJŠANO: Vrlo brži auto-refresh za bolju sinkronizaciju
-  useAutoRefresh(
-    matches,
-    () => fetchLiveMatches(true),
-    3000 // 🔧 DRASTIČNO SMANJENO na 3s za ultra-brzu sinkronizaciju
-  );
-
-  // Realtime: slušaj SVE promjene pa lokalno odluči zadržati/izbaciti
-  useEffect(() => {
-    if (!autoFetch) return;
-
     const channel = supabase
-      .channel("matches-live")
+      .channel("live-matches")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "matches" },
         (payload) => {
-          if (!mountedRef.current) return;
-          const row = payload.new;
-          if (!row || !row.id) return;
+          const row = payload.new || payload.old || {};
+          const st = String(row.status || "").toLowerCase();
+          // samo live/ht nas zanima
+          if (!["live", "ht"].includes(st)) return;
 
-          const status = String(
-            row.status || row.status_type || ""
-          ).toLowerCase();
-          const isLiveNow = LIVE_SET.has(status);
-          const strictLiveNow = isLiveNow && applyStrict([row]).length > 0;
+          lastRealtimeAtRef.current = Date.now();
+          setIsRealtimeActive(true);
 
-          setMatches((prev) => {
-            const idx = prev.findIndex((m) => m.id === row.id);
-
-            // ako više NIJE live ili je postao zastario -> ukloni
-            if (!strictLiveNow) {
-              if (idx === -1) return prev;
-              const copy = [...prev];
-              copy.splice(idx, 1);
-              console.log(
-                `🔄 Realtime: Removed ${row.home_team} vs ${row.away_team} from live`
-              );
-              return copy;
-            }
-
-            // live i ne postoji -> dodaj
-            if (idx === -1) {
-              console.log(
-                `🔄 Realtime: Added ${row.home_team} vs ${row.away_team} to live`
-              );
-              return [row, ...applyStrict(prev)];
-            }
-
-            // update postojećeg
-            const copy = [...prev];
-            copy[idx] = { ...copy[idx], ...row };
-            return applyStrict(copy);
+          setMatches((cur) => {
+            const idx = cur.findIndex((m) => m.id === row.id);
+            if (idx === -1) return [row, ...cur];
+            const next = [...cur];
+            next[idx] = { ...next[idx], ...row };
+            return next;
           });
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        setIsRealtimeActive(status === "SUBSCRIBED");
+      });
 
     return () => {
       supabase.removeChannel(channel);
+      setIsRealtimeActive(false);
     };
-  }, [autoFetch, applyStrict]);
+  }, []);
 
-  // 🚀 POBOLJŠANO: Češće lokalno čišćenje
+  // ✅ Dinamični polling + “realtime silent” fallback
   useEffect(() => {
-    const id = setInterval(() => {
-      setMatches((prev) => {
-        const cleaned = applyStrict(prev);
-        if (cleaned.length !== prev.length) {
-          console.log(
-            `🧹 Local cleanup: ${prev.length} -> ${cleaned.length} live matches`
-          );
-        }
-        return cleaned;
-      });
-    }, 6000); // 🔧 SMANJENO s 8s na 6s
-    return () => clearInterval(id);
-  }, [applyStrict]);
+    const scheduleNext = () => {
+      const interval = pickInterval(liveCount);
 
-  return { matches, loading, backgroundRefreshing, error, fetchLiveMatches };
+      // Ako realtime nije ništa javio >12s (dvostruko od fast), napravi safety refresh
+      const silentFor = Date.now() - lastRealtimeAtRef.current;
+      const needSafety =
+        isRealtimeActive && silentFor > Math.max(interval * 2, 12000);
+
+      if (needSafety) {
+        fetchOnce(false);
+      }
+
+      timerRef.current = setTimeout(() => {
+        fetchOnce(false);
+        scheduleNext();
+      }, interval);
+    };
+
+    // očisti prethodni
+    if (timerRef.current) clearTimeout(timerRef.current);
+    scheduleNext();
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [liveCount, isRealtimeActive, fetchOnce]);
+
+  // ✅ pauza kad je prozor nevidljiv, nastavi kad se vrati
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        fetchOnce(false);
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [fetchOnce]);
+
+  return {
+    matches,
+    liveCount,
+    loading,
+    backgroundRefreshing,
+    error,
+    lastRefreshed,
+    isRealtimeActive,
+    refreshNow,
+    fetchLiveMatches: fetchOnce, // backward compat (prima true/false)
+  };
 }
+
+export default useLiveMatches;

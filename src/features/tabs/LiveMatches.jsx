@@ -27,35 +27,40 @@ export default function LiveMatches() {
 
   const userPreferences = useUserPreferences();
 
-  const { matches, loading, backgroundRefreshing, error, fetchLiveMatches } =
-    useLiveMatches();
+  const {
+    matches,
+    loading,
+    backgroundRefreshing,
+    error,
+    lastRefreshed,
+    isRealtimeActive,
+    refreshNow,
+    fetchLiveMatches, // još uvijek postoji, ali koristi refreshNow za ručni klik
+  } = useLiveMatches();
 
   // 🚀 NOVO: Force refresh ako se broj drastično promijeni
   useEffect(() => {
-    const currentCount = matches.length;
+    const currentCount = matches?.length ?? 0;
     const prevCount = prevCountRef.current;
 
-    // Ako se broj promijenio za 2 ili više, napravi force refresh
     if (prevCount > 0 && Math.abs(currentCount - prevCount) >= 2) {
       console.log(
         `🚨 [FORCE REFRESH] Count changed: ${prevCount} → ${currentCount}`
       );
-
-      // Čekaj malo pa refresh
       setTimeout(() => {
         fetchLiveMatches(true);
       }, 1000);
     }
 
     prevCountRef.current = currentCount;
-  }, [matches.length, fetchLiveMatches]);
+  }, [matches?.length, fetchLiveMatches]);
 
   // 🔧 FIXED: Proper sorting with time sort integration
   const sortedMatches = useMemo(() => {
-    if (!matches || matches.length === 0) return [];
+    const input = Array.isArray(matches) ? matches : [];
+    if (input.length === 0) return [];
 
-    // First apply smart sorting
-    const smartSorted = sortMatches(matches, {
+    const smartSorted = sortMatches(input, {
       prioritizeUserFavorites: userPreferences.sortingEnabled,
       favoriteTeams: userPreferences.favoriteTeams,
       favoriteLeagues: userPreferences.favoriteLeagues,
@@ -66,7 +71,7 @@ export default function LiveMatches() {
     // Then apply time sorting
     const finalSorted = applyTimeSort(smartSorted, timeSortType);
     return finalSorted;
-  }, [matches, userPreferences, timeSortType]); // 🔧 FIXED: Added timeSortType dependency
+  }, [matches, userPreferences, timeSortType]);
 
   const groupedMatches = useMemo(() => {
     if (!groupByCompetition) return null;
@@ -90,14 +95,14 @@ export default function LiveMatches() {
   ).length;
 
   useEffect(() => {
-    if (matches.length > 0) {
+    if ((matches?.length ?? 0) > 0) {
       const interval = setInterval(() => {
         setCurrentTime(new Date());
       }, 1000);
 
       return () => clearInterval(interval);
     }
-  }, [matches.length]);
+  }, [matches?.length]);
 
   if (loading) {
     return <LoadingState message="Loading live matches..." />;
@@ -107,7 +112,7 @@ export default function LiveMatches() {
     return <ErrorState error={error} onRetry={() => fetchLiveMatches(false)} />;
   }
 
-  if (matches.length === 0) {
+  if (!Array.isArray(matches) || matches.length === 0) {
     return <EmptyLiveMatches onRefresh={() => fetchLiveMatches(false)} />;
   }
 

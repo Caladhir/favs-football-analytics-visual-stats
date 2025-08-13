@@ -1,23 +1,13 @@
 # scraper/processors/__init__.py
-"""
-Processors module - handles data processing and transformation
-"""
+from .status_processor import map_status
+from .match_processor import process_events_with_teams, prepare_for_database
+from .team_processor import build_team_records, get_team_uuid, store_teams
 
-from .match_processor import MatchProcessor
-from .status_processor import StatusProcessor
-from .competition_processor import CompetitionProcessor
-
-# Global processor instances
-match_processor = MatchProcessor()
-status_processor = StatusProcessor()
-competition_processor = CompetitionProcessor()
-
-# Export for easy importing
 __all__ = [
-    'MatchProcessor',
-    'StatusProcessor', 
-    'CompetitionProcessor',
-    'match_processor',
-    'status_processor',
-    'competition_processor'
+    "map_status",
+    "process_events_with_teams",
+    "prepare_for_database",
+    "build_team_records",
+    "get_team_uuid",
+    "store_teams",
 ]

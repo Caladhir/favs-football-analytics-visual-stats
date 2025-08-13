@@ -1,90 +1,78 @@
-# scraper/processors/status_processor.py - STATUS MAPPING & VALIDATION
-import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional
-from core.config import config
-from utils.logger import get_logger
+# scraper/processors/status_processor.py
+from typing import Any, Dict, Optional
 
-logger = get_logger(__name__)
+ALLOWED_DB_STATUSES = {"live", "ht", "finished", "ft", "upcoming", "postponed", "canceled", "abandoned"}
 
-class StatusProcessor:
-    """Handles status mapping and validation"""
-    
-    @staticmethod
-    def map_status(status_type: str, start_time: datetime, now: datetime = None) -> str:
-        """Map SofaScore status to app status with time validation"""
-        if now is None:
-            now = datetime.now(timezone.utc)
-        
-        # Basic mapping
-        mapped_status = config.STATUS_MAPPING.get(status_type, "upcoming")
-        
-        # Time validation for live matches
-        time_since_start = now - start_time
-        
-        if mapped_status in ["live", "ht"] and time_since_start > timedelta(hours=config.ZOMBIE_HOUR_LIMIT):
-            logger.warning(f"Zombie match detected - {time_since_start} since start")
-            logger.warning(f"Forcing {status_type} -> finished for match at {start_time}")
-            return "finished"
-        
-        # Check for future matches marked as live
-        if start_time > now + timedelta(minutes=config.FUTURE_TOLERANCE_MINUTES) and mapped_status in ["live", "ht"]:
-            logger.warning(f"Future match marked as live - forcing to upcoming")
-            return "upcoming"
-        
-        return mapped_status
-    
-    @staticmethod
-    def calculate_minute(status_type: str, period_start: Optional[int], period: int, 
-                        now: datetime, start_time: datetime) -> Optional[int]:
-        """Calculate current minute realistically"""
-        
-        # Only for live matches
-        if status_type not in ["inprogress", "halftime"]:
-            return None
-        
-        if not start_time:
-            return None
-            
-        # Calculate minutes from match start
-        minutes_from_start = int((now.timestamp() - start_time.timestamp()) // 60)
-        
-        # Safety checks
-        if minutes_from_start < 0:
-            return 1
-        if minutes_from_start > 150:  # More than 2.5h - probably error
-            logger.warning(f"Suspicious time calculation: {minutes_from_start}' - capping at 90")
-            return 90
-        
-        # REALISTIC CALCULATION based on time from match start
-        if minutes_from_start <= 45:
-            # First half (1-45')
-            calculated = max(1, minutes_from_start)
-            return calculated
-            
-        elif minutes_from_start <= 60:
-            # Halftime break (45-60')
-            if status_type == "halftime":
-                return 45  # Show 45' during halftime
-            else:
-                # Maybe first half extra time
-                additional = min(minutes_from_start - 45, 5)  # Max +5 min
-                calculated = 45 + additional
-                return calculated
-                
-        elif minutes_from_start <= 105:
-            # Second half (60-105' from start = 46'-90' match time)
-            second_half_minute = 45 + (minutes_from_start - 60)
-            calculated = min(second_half_minute, 90)
-            return calculated
-            
-        else:
-            # Extra time or overtime (105+')
-            if minutes_from_start <= 120:
-                overtime = 90 + (minutes_from_start - 105)
-                calculated = min(overtime, 120)
-                return calculated
-            else:
-                # Too late - probably should finish match
-                logger.warning(f"Match too long ({minutes_from_start}') - should be finished")
-                return 90
+# Mapiranje SofaScore status.type (string) -> naš status
+TYPE_STR_MAP = {
+    "inprogress": "live",
+    "in_progress": "live",
+    "halftime": "ht",
+    "finished": "finished",
+    "ft": "finished",
+    "notstarted": "upcoming",
+    "postponed": "postponed",
+    "cancelled": "canceled",
+    "canceled": "canceled",
+    "abandoned": "abandoned",
+    # izvan DB-shemea -> premapiraj na dopušteno
+    "suspended": "postponed",
+}
+
+# Mapiranje SofaScore status.code (int) -> naš status (minimalno što trebamo)
+CODE_INT_MAP = {
+    0: "upcoming",   # not started
+    1: "live",       # 1st half / in progress
+    2: "ht",         # halftime
+    3: "live",       # 2nd half
+    6: "live",       # extra time
+    7: "live",       # penalties / playing
+    60: "postponed",
+    70: "canceled",
+    100: "finished",
+    120: "finished", # after ET
+}
+
+def map_status(raw_status: Dict[str, Any]) -> str:
+    """
+    raw_status primjer:
+      { 'type': 'inprogress', 'code': 6, 'description': '...' }
+      ili { 'type': 100, 'description': 'finished' } ovisno o endpointu
+    """
+    if not isinstance(raw_status, dict):
+        return "upcoming"
+
+    st_type = raw_status.get("type")
+    st_code = raw_status.get("code")
+
+    # 1) string `type`
+    if isinstance(st_type, str):
+        val = TYPE_STR_MAP.get(st_type.lower())
+        if val:
+            return val
+
+    # 2) numeric `code`
+    if isinstance(st_code, int):
+        val = CODE_INT_MAP.get(st_code)
+        if val:
+            return val
+
+    # 3) fallback: ako postoji description s HT/FT (SofaScore javno objašnjava HT/FT) 
+    # https://sofascore.helpscoutdocs.com/article/49-match-statuses-explained
+    desc = str(raw_status.get("description", "")).lower()
+    if "ht" in desc or "half-time" in desc:
+        return "ht"
+    if "ft" in desc or "full-time" in desc:
+        return "finished"
+
+    return "upcoming"
+
+def clamp_to_db(status: str) -> str:
+    """Garantiraj da je status jedan od dopuštenih u DB CHECK constraintu."""
+    s = (status or "").lower()
+    if s in ALLOWED_DB_STATUSES:
+        return s
+    # Fallbackovi (suspendirano/varijante) u dopuštene:
+    if s in {"suspended"}:
+        return "postponed"
+    return "upcoming"
