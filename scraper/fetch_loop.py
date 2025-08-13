@@ -61,11 +61,19 @@ class ContinuousScraper:
                 logger.error("❌ Database health check failed")
                 return False
             if not self.browser:
-                self.browser = BrowserManager()
+                self.browser = BrowserManager()  # kreiraj svježe
             return True
         except Exception as e:
             logger.error(f"❌ Setup failed: {e}")
+            # ako je browser napola srušen, prisilno ga poništi
+            try:
+                if self.browser:
+                    self.browser.close()
+            except Exception:
+                pass
+            self.browser = None
             return False
+
 
     def _cleanup_old(self):
         try:
@@ -154,6 +162,15 @@ class ContinuousScraper:
             return True
         except Exception as e:
             logger.error(f"❌ Cycle failed: {e}")
+            import traceback
+            traceback.print_exc()
+            # 🆕 hard reset browsera – ponekad je najbrže riješiti invalid session
+            try:
+                if self.browser:
+                    self.browser.close()
+            except Exception:
+                pass
+            self.browser = None
             return False
 
     def run_continuous(self, base_interval: int = 30):

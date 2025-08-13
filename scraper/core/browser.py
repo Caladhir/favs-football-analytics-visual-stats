@@ -1,190 +1,268 @@
-# scraper/core/browser.py 
+# scraper/core/browser.py - STABLE ENHANCED VERSION (auto-refresh session + watchdog)
 import time
+import threading
+import contextlib
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import (
+    WebDriverException,
+    InvalidSessionIdException,
+)
 from .config import config
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 class BrowserManager:
-    """Upravljanje browser sesijom s enhanced stability"""
-    
+    """Chrome/Brave manager sa session watchdogom i auto-refreshom."""
+
     def __init__(self):
         self.driver = None
+        self.session_start_time: datetime | None = None
+        self.last_activity: datetime | None = None
+
+        # ✅ umjesto config.get(...) koristimo getattr s defaultom
+        self.session_max_duration = int(getattr(config, "SESSION_MAX_DURATION", 3600))  # 1h
+        self.health_check_interval = int(getattr(config, "HEALTH_CHECK_INTERVAL", 300))  # 5min
+
+        self.session_lock = threading.Lock()
+        self._stop_watchdog = threading.Event()  # ✅ bilo je nedostajalo
         self._setup_browser()
-    
+        self._start_watchdog()
+
+    # ---------- internals ----------
+
     def _setup_browser(self):
-        """Postavi browser s optimiziranim opcijama"""
+        """Pokreni Chrome/Brave s optimiziranim opcijama."""
         logger.info("Setting up browser...")
-        
         try:
             options = webdriver.ChromeOptions()
             options.binary_location = config.BRAVE_PATH
-            
-            for option in config.CHROME_OPTIONS:
-                options.add_argument(option)
-            
-            options.add_experimental_option("prefs", config.CHROME_PREFS)
-            options.page_load_strategy = 'eager'
-            
+
+            stability_options = [
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+                "--disable-gpu",
+                "--disable-extensions",
+                "--disable-plugins",
+                "--mute-audio",
+                "--disable-background-timer-throttling",
+                "--disable-renderer-backgrounding",
+                "--disable-backgrounding-occluded-windows",
+            ]
+
+            for opt in list(getattr(config, "CHROME_OPTIONS", [])) + stability_options:
+                options.add_argument(opt)
+
+            # prefs (blokiramo slike radi brzine)
+            prefs = {
+                **getattr(config, "CHROME_PREFS", {}),
+                "profile.managed_default_content_settings.images": 2,
+                "profile.default_content_setting_values.notifications": 2,
+            }
+            options.add_experimental_option("prefs", prefs)
+
+            options.page_load_strategy = "eager"
+
             self.driver = webdriver.Chrome(
                 service=Service(config.CHROMEDRIVER_PATH),
-                options=options
+                options=options,
             )
-            
-            self.driver.set_page_load_timeout(config.PAGE_LOAD_TIMEOUT)
-            self.driver.implicitly_wait(config.IMPLICIT_WAIT)
-            
+            self.driver.set_page_load_timeout(int(getattr(config, "PAGE_LOAD_TIMEOUT", 30)))
+            self.driver.implicitly_wait(int(getattr(config, "IMPLICIT_WAIT", 10)))
+
+            self.session_start_time = datetime.now()
+            self.last_activity = datetime.now()
             logger.info("✅ Browser started successfully")
-            
         except Exception as e:
             logger.error(f"❌ Failed to start browser: {e}")
             raise
-    
+
+    def _is_session_valid(self) -> bool:
+        """Provjeri da je WebDriver sesija živa."""
+        try:
+            if not self.driver:
+                return False
+            _ = self.driver.current_url  # ping
+            return True
+        except (InvalidSessionIdException, WebDriverException):
+            return False
+        except Exception as e:
+            logger.warning(f"Session validation error: {e}")
+            return False
+
+    def _should_refresh_session(self) -> bool:
+        """Treba li obnoviti sesiju zbog starosti."""
+        if not self.session_start_time:
+            return True
+        age = (datetime.now() - self.session_start_time).total_seconds()
+        return age > self.session_max_duration
+
+    def _refresh_session(self):
+        """Tvrdi refresh cijelog browsera."""
+        logger.info("🔄 Refreshing browser session...")
+        try:
+            if self.driver:
+                with contextlib.suppress(Exception):
+                    self.driver.quit()
+        finally:
+            self.driver = None
+
+        self._setup_browser()
+        logger.info("✅ Session refreshed successfully")
+
+    def _ensure_valid_session(self):
+        """Centralna točka: osiguraj valjan driver, osvježi ako treba."""
+        with self.session_lock:
+            if (not self._is_session_valid()) or self._should_refresh_session():
+                self._refresh_session()
+            self.last_activity = datetime.now()
+
+    def _with_session(self, fn, *, retries: int = 1, on_retry_wait: float = 1.0):
+        """
+        Izvrši fn() uz auto-refresh sesije na InvalidSessionId/WebDriverException.
+        """
+        for attempt in range(retries + 1):
+            try:
+                self._ensure_valid_session()
+                return fn()
+            except (InvalidSessionIdException, WebDriverException) as e:
+                logger.warning(
+                    f"Driver call failed ({type(e).__name__}), "
+                    f"attempt {attempt + 1}/{retries + 1}"
+                )
+                if attempt < retries:
+                    self._refresh_session()
+                    time.sleep(on_retry_wait)
+                    continue
+                raise
+
+    def _start_watchdog(self):
+        """Pozadinski thread koji periodički provjerava i/ili obnavlja sesiju."""
+        def _loop():
+            while not self._stop_watchdog.is_set():
+                try:
+                    if self._should_refresh_session():
+                        logger.info("🕒 Watchdog: session too old → refreshing")
+                        self._refresh_session()
+                    else:
+                        # lagani ping – bez stroge greške ako ne uspije
+                        self.health_check()
+                except Exception as e:
+                    logger.warning(f"Watchdog warning: {e}")
+                finally:
+                    self._stop_watchdog.wait(self.health_check_interval)
+
+        t = threading.Thread(target=_loop, daemon=True)
+        t.start()
+
+    # ---------- public API ----------
+
     def fetch_data(self, endpoint: str, max_retries: int = 3) -> dict:
-        """Fetch data s retry logikom"""
+        """
+        Dohvati JSON s SofaScore API-ja preko browsera.
+        Automatski rješava invalid session i radi retrye s eksponencijalnim čekanjem.
+        """
         for attempt in range(max_retries):
             try:
                 logger.info(f"Fetching {endpoint} (attempt {attempt + 1}/{max_retries})")
-                
-                if attempt == 0:
-                    logger.info("Navigating to SofaScore...")
-                    self.driver.get("https://www.sofascore.com/")
-                    
-                    try:
-                        self.driver.execute_script("return document.readyState") == "complete"
+
+                # 1) osiguraj da smo na sofascore.com (wrapano kroz _with_session)
+                def _nav():
+                    cur = ""
+                    with contextlib.suppress(Exception):
+                        cur = self.driver.current_url
+                    if not cur or "sofascore.com" not in cur:
+                        logger.info("Navigating to SofaScore...")
+                        self.driver.get("https://www.sofascore.com/")
                         time.sleep(2)
-                    except:
-                        time.sleep(5)
-                
+                self._with_session(_nav, retries=1)
+
+                # 2) pokupi JSON
                 api_url = f"https://www.sofascore.com/api/v1/sport/football/{endpoint}"
-                
                 script = f"""
-                    console.log('Fetching: {api_url}');
                     return fetch("{api_url}", {{
                         headers: {{
                             "Accept": "application/json, text/plain, */*",
                             "Referer": "https://www.sofascore.com/",
                             "User-Agent": navigator.userAgent
                         }}
-                    }})
-                    .then(res => {{
-                        console.log('Response status:', res.status);
-                        if (!res.ok) throw new Error('HTTP ' + res.status);
-                        return res.json();
-                    }})
-                    .catch(err => {{
-                        console.error('Fetch error:', err);
-                        throw err;
+                    }}).then(r => {{
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
                     }});
                 """
-                
-                result = self.driver.execute_script(script)
-                
-                if result and isinstance(result, dict):
+
+                def _exec():
+                    return self.driver.execute_script(script)
+
+                result = self._with_session(_exec, retries=1)
+
+                if isinstance(result, dict):
                     logger.info(f"✅ Successfully fetched {endpoint}")
+                    self.last_activity = datetime.now()
                     return result
-                else:
-                    raise Exception(f"Invalid response format: {type(result)}")
-                    
+
+                raise Exception(f"Invalid response format: {type(result)}")
+
             except Exception as e:
-                logger.error(f"❌ Attempt {attempt + 1} failed: {str(e)}")
-                
+                logger.error(f"❌ Attempt {attempt + 1} failed for {endpoint}: {e}")
                 if attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 2 
-                    logger.info(f"Waiting {wait_time}s before retry...")
-                    time.sleep(wait_time)
-                    
-                    try:
-                        self.driver.execute_script("window.location.reload();")
-                        time.sleep(3)
-                    except:
-                        logger.warning("Failed to reload page")
-                else:
-                    logger.error(f"All attempts failed for {endpoint}")
-                    raise Exception(f"Failed to fetch {endpoint} after {max_retries} attempts")
-    
+                    wait = (attempt + 1) * 2
+                    logger.info(f"Waiting {wait}s before retry...")
+                    time.sleep(wait)
+                    continue
+                logger.error(f"All attempts failed for {endpoint}")
+                raise Exception(f"Failed to fetch {endpoint} after {max_retries} attempts")
+
     def health_check(self) -> bool:
-        """Provjeri health browsera"""
+        """Lagani JS ping; vraća False ako je sporo ili invalid session."""
         try:
-            start_time = time.time()
-            
-            result = self.driver.execute_script("""
-                return {
-                    url: window.location.href,
-                    readyState: document.readyState,
-                    userAgent: navigator.userAgent.substring(0, 50),
-                    memoryUsage: performance.memory ? {
-                        used: performance.memory.usedJSHeapSize,
-                        total: performance.memory.totalJSHeapSize,
-                        limit: performance.memory.jsHeapSizeLimit
-                    } : null,
-                    timestamp: Date.now()
-                };
-            """)
-            
-            response_time = time.time() - start_time
-            
-            logger.info(f"Browser response time: {response_time:.2f}s")
-            
-            if result.get('memoryUsage'):
-                memory = result['memoryUsage']
-                used_mb = memory['used'] / 1024 / 1024
-                total_mb = memory['total'] / 1024 / 1024
-                usage_pct = (memory['used'] / memory['total']) * 100
-                
-                logger.info(f"Browser memory: {used_mb:.1f}/{total_mb:.1f}MB ({usage_pct:.1f}%)")
-                
-                if usage_pct > 80:
-                    logger.warning(f"High memory usage ({usage_pct:.1f}%)")
-                    return False
-            
-            if response_time > 5:
-                logger.warning(f"Slow browser response ({response_time:.2f}s)")
+            if not self._is_session_valid():
+                logger.warning("Health check failed: Invalid session")
                 return False
-                
-            logger.info("✅ Browser is healthy")
+
+            start = time.time()
+            _ = self.driver.execute_script(
+                "return {href: location.href, rs: document.readyState, ts: Date.now()};"
+            )
+            dt = time.time() - start
+            if dt > 10:
+                logger.warning(f"Slow health check response: {dt:.2f}s")
+                return False
+
+            age_h = (datetime.now() - self.session_start_time).total_seconds() / 3600
+            logger.info(f"✅ Health check OK (session age: {age_h:.1f}h)")
             return True
-            
         except Exception as e:
-            logger.error(f"❌ Browser health check failed: {e}")
+            logger.error(f"❌ Health check failed: {e}")
             return False
-    
-    def cleanup_resources(self):
-        """Cleanup browser memorije"""
-        try:
-            logger.info("Cleaning browser resources...")
-            
-            self.driver.execute_script("""
-                if (window.gc) {
-                    window.gc();
-                }
-                
-                // Clear caches
-                if ('caches' in window) {
-                    caches.keys().then(names => {
-                        names.forEach(name => caches.delete(name));
-                    });
-                }
-                
-                // Clear console
-                console.clear();
-                
-                return 'cleanup_done';
-            """)
-            
-            logger.info("✅ Browser cleanup completed")
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Browser cleanup failed: {e}")
-    
+
+    def get_session_stats(self) -> dict:
+        if not self.session_start_time:
+            return {}
+        dur = datetime.now() - self.session_start_time
+        last = (datetime.now() - self.last_activity).total_seconds() / 60 if self.last_activity else None
+        return {
+            "session_duration_hours": dur.total_seconds() / 3600,
+            "last_activity_minutes_ago": last,
+            "session_valid": self._is_session_valid(),
+            "should_refresh": self._should_refresh_session(),
+        }
+
     def close(self):
-        """Zatvori browser"""
-        if self.driver:
-            try:
-                self.cleanup_resources()
-                self.driver.quit()
+        """Zatvori sve uredno."""
+        try:
+            self._stop_watchdog.set()
+            if self.driver:
+                with contextlib.suppress(Exception):
+                    self.driver.quit()
                 logger.info("✅ Browser closed successfully")
-            except Exception as e:
-                logger.warning(f"⚠️ Error closing browser: {e}")
+        except Exception as e:
+            logger.error(f"Error closing browser: {e}")
+        finally:
+            self.driver = None
+            self.session_start_time = None
+            self.last_activity = None
