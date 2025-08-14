@@ -1,5 +1,5 @@
-// src/features/tabs/FinishedMatches.jsx - COMPLETELY REFACTORED WITH NEW HOOKS
-import React, { useState } from "react";
+// src/features/tabs/FinishedMatches.jsx - WITH DATE SYNC AND FUTURE RESTRICTION
+import React, { useState, useEffect } from "react";
 import { useFinishedMatches } from "../../hooks/useFinishedMatches";
 import { groupMatchesByCompetition } from "../../utils/matchSortingUtils";
 
@@ -21,7 +21,27 @@ export default function FinishedMatches() {
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [resultFilter, setResultFilter] = useState("all");
 
-  // 🚀 NEW: Use specialized hook with filters
+  // 🔄 SYNC: Kada se promijeni timeFilter, ažuriraj selectedDate
+  useEffect(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+
+    switch (timeFilter) {
+      case "today":
+        setSelectedDate(today);
+        break;
+      case "yesterday":
+        setSelectedDate(yesterday);
+        break;
+      case "selected":
+        // Zadržava trenutni selectedDate
+        break;
+      // Za "week" i "all" ne mijenjamo selectedDate
+    }
+  }, [timeFilter]);
+
+  // 🚀 Use specialized hook with filters
   const {
     matches,
     allFinishedMatches,
@@ -47,7 +67,24 @@ export default function FinishedMatches() {
       ? groupMatchesByCompetition(matches)
       : null;
 
-  // 🔧 Loading state
+  // Handler za promjenu datuma (s validacijom)
+  const handleDateChange = (newDate) => {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+
+    // Ne dopusti buduće datume
+    if (newDate > today) {
+      return;
+    }
+
+    setSelectedDate(newDate);
+    // Kada ručno mijenjamo datum, prebaci na "selected" filter
+    if (timeFilter !== "selected") {
+      setTimeFilter("selected");
+    }
+  };
+
+  // 📍 Loading state
   if (loading) {
     return (
       <div className="min-h-screen bg-muted rounded-3xl p-1">
@@ -61,33 +98,34 @@ export default function FinishedMatches() {
     );
   }
 
-  // 🔧 Error state
+  // 📍 Error state
   if (error) {
     return <ErrorState error={error} onRetry={refetch} />;
   }
 
-  // 🔧 No finished matches at all
+  // 📍 No finished matches at all
   if (!allFinishedMatches || allFinishedMatches.length === 0) {
     return (
       <EmptyFinishedMatches
         selectedDate={selectedDate}
-        setSelectedDate={setSelectedDate}
+        setSelectedDate={handleDateChange}
         timeFilter={timeFilter}
         priorityFilter={priorityFilter}
         resultFilter={resultFilter}
         onRefresh={refetch}
+        maxDateToday={true} // 🔒 Blokiraj budućnost
       />
     );
   }
 
-  // 🔧 No matches after filtering
+  // 📍 No matches after filtering
   if (!matches || matches.length === 0) {
     return (
       <div className="min-h-screen bg-muted rounded-3xl p-1">
         {/* Header with filters */}
         <FinishedMatchesHeader
           selectedDate={selectedDate}
-          setSelectedDate={setSelectedDate}
+          setSelectedDate={handleDateChange}
           stats={stats}
           backgroundRefreshing={backgroundRefreshing}
           timeFilter={timeFilter}
@@ -101,6 +139,7 @@ export default function FinishedMatches() {
           topLeaguesCount={0}
           favoritesCount={0}
           totalCount={0}
+          maxDateToday={true} // 🔒 Blokiraj budućnost
         />
 
         {/* Empty state with clear filters option */}
@@ -155,13 +194,13 @@ export default function FinishedMatches() {
     );
   }
 
-  // 🔧 Main render with matches
+  // 📍 Main render with matches
   return (
     <div className="min-h-screen bg-muted rounded-3xl p-1">
       {/* Header with date picker and filter dropdowns */}
       <FinishedMatchesHeader
         selectedDate={selectedDate}
-        setSelectedDate={setSelectedDate}
+        setSelectedDate={handleDateChange}
         stats={stats}
         backgroundRefreshing={backgroundRefreshing}
         timeFilter={timeFilter}
@@ -175,6 +214,7 @@ export default function FinishedMatches() {
         topLeaguesCount={topLeaguesCount}
         favoritesCount={favoritesCount}
         totalCount={totalCount}
+        maxDateToday={true} // 🔒 Blokiraj budućnost
       />
 
       {/* Matches grid */}

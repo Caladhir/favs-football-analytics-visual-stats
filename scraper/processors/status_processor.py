@@ -1,5 +1,6 @@
 # scraper/processors/status_processor.py
 from typing import Any, Dict, Optional
+from datetime import datetime, timezone, timedelta
 
 ALLOWED_DB_STATUSES = {"live", "ht", "finished", "ft", "upcoming", "postponed", "canceled", "abandoned"}
 
@@ -15,11 +16,11 @@ TYPE_STR_MAP = {
     "cancelled": "canceled",
     "canceled": "canceled",
     "abandoned": "abandoned",
-    # izvan DB-shemea -> premapiraj na dopušteno
+    # izvan DB-sheme -> premapiraj na dopušteno
     "suspended": "postponed",
 }
 
-# Mapiranje SofaScore status.code (int) -> naš status (minimalno što trebamo)
+# Mapiranje SofaScore status.code (int) -> naš status
 CODE_INT_MAP = {
     0: "upcoming",   # not started
     1: "live",       # 1st half / in progress
@@ -34,31 +35,22 @@ CODE_INT_MAP = {
 }
 
 def map_status(raw_status: Dict[str, Any]) -> str:
-    """
-    raw_status primjer:
-      { 'type': 'inprogress', 'code': 6, 'description': '...' }
-      ili { 'type': 100, 'description': 'finished' } ovisno o endpointu
-    """
     if not isinstance(raw_status, dict):
         return "upcoming"
 
     st_type = raw_status.get("type")
     st_code = raw_status.get("code")
 
-    # 1) string `type`
     if isinstance(st_type, str):
         val = TYPE_STR_MAP.get(st_type.lower())
         if val:
             return val
 
-    # 2) numeric `code`
     if isinstance(st_code, int):
         val = CODE_INT_MAP.get(st_code)
         if val:
             return val
 
-    # 3) fallback: ako postoji description s HT/FT (SofaScore javno objašnjava HT/FT) 
-    # https://sofascore.helpscoutdocs.com/article/49-match-statuses-explained
     desc = str(raw_status.get("description", "")).lower()
     if "ht" in desc or "half-time" in desc:
         return "ht"
@@ -68,11 +60,42 @@ def map_status(raw_status: Dict[str, Any]) -> str:
     return "upcoming"
 
 def clamp_to_db(status: str) -> str:
-    """Garantiraj da je status jedan od dopuštenih u DB CHECK constraintu."""
     s = (status or "").lower()
     if s in ALLOWED_DB_STATUSES:
         return s
-    # Fallbackovi (suspendirano/varijante) u dopuštene:
     if s in {"suspended"}:
         return "postponed"
     return "upcoming"
+
+def coerce_status_with_time(status: str,
+                            start_time_iso: Optional[str],
+                            now: Optional[datetime] = None,
+                            grace_before_min: int = 10,
+                            force_finish_after_h: int = 3) -> str:
+    """
+    Blagi vremenski guard:
+    - upcoming/scheduled malo prije ili malo poslije starta ostaje 'upcoming' (frontend ga ionako skriva ako je prošao).
+    - live/ht stariji od force_finish_after_h -> 'finished'
+    - upcoming stariji od force_finish_after_h -> 'finished' (fallback; glavno čišćenje radimo u DB-u)
+    """
+    base = clamp_to_db(status)
+    if not start_time_iso:
+        return base
+
+    now = now or datetime.now(timezone.utc)
+    try:
+        st = datetime.fromisoformat(start_time_iso.replace("Z", "+00:00"))
+    except Exception:
+        return base
+
+    if base in {"live", "ht"} and now - st > timedelta(hours=force_finish_after_h):
+        return "finished"
+
+    if base in {"upcoming"}:
+        # ako je daleko prešlo vrijeme početka, pro-glasi finished (fallback)
+        if now - st > timedelta(hours=force_finish_after_h):
+            return "finished"
+        # u suprotnom, ostavi 'upcoming' (frontend ima stricter filter po vremenu)
+        return "upcoming"
+
+    return base

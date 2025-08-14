@@ -26,6 +26,7 @@ export default function FinishedMatchesHeader({
   topLeaguesCount,
   favoritesCount,
   totalCount,
+  maxDateToday = true,
 }) {
   return (
     <div className="text-center space-y-4">
@@ -45,8 +46,14 @@ export default function FinishedMatchesHeader({
       </div>
 
       {/* Date picker */}
-      <CalendarPopover date={selectedDate} setDate={setSelectedDate} />
-
+      {/* Date picker with restrictions */}
+      <div className="flex justify-center my-2 gap-4">
+        <CalendarPopover
+          date={selectedDate}
+          setDate={setSelectedDate}
+          maxDateToday={maxDateToday}
+        />
+      </div>
       {/* Filter Controls Row */}
       <div className="flex justify-center items-center gap-3 flex-wrap">
         {/* Time Filter Dropdown */}

@@ -6,14 +6,19 @@ import supabase from "../services/supabase";
 const matchesCache = new Map();
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minuta
 
-// 🔧 ISPRAVLJENA: Cache utilities s boljim date handling
-const getCacheKey = (date) => {
-  // Koristi lokalni datum umjesto ISO string
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+const toDate = (x) => (x instanceof Date ? x : new Date(x));
+const ymd = (d) => {
+  const dt = toDate(d);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const day = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 };
+
+// 🔧 ISPRAVLJENA: Cache utilities s boljim date handling
+function getCacheKey(date) {
+  return ymd(date);
+}
 
 const isCacheValid = (timestamp) => {
   return Date.now() - timestamp < CACHE_DURATION;

@@ -4,14 +4,9 @@ from __future__ import annotations
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime, timezone
 from utils.logger import get_logger
-from .status_processor import map_status, clamp_to_db
+from .status_processor import map_status, clamp_to_db, coerce_status_with_time
 
 logger = get_logger(__name__)
-
-
-# ---------------------------
-# Helperi
-# ---------------------------
 
 def _safe_team_name(team: Any) -> str:
     if not isinstance(team, dict):
@@ -23,7 +18,6 @@ def _safe_team_name(team: Any) -> str:
         or "Unknown"
     )
 
-
 def _extract_scores(event: Dict[str, Any]) -> Tuple[int, int]:
     hs = event.get("homeScore") or {}
     as_ = event.get("awayScore") or {}
@@ -34,15 +28,12 @@ def _extract_scores(event: Dict[str, Any]) -> Tuple[int, int]:
             return 0
     return _num(hs.get("current") or hs.get("normaltime")), _num(as_.get("current") or as_.get("normaltime"))
 
-
 def _extract_minute(event: Dict[str, Any]) -> Optional[int]:
     t = event.get("time") or {}
     minute = t.get("minute")
     return minute if isinstance(minute, int) else None
 
-
 def _to_iso_utc(ts: Any) -> Optional[str]:
-    """Sofascore obično vraća epoch u sekundama. Pretvori u ISO UTC ili vrati None."""
     if ts is None:
         return None
     try:
@@ -51,29 +42,21 @@ def _to_iso_utc(ts: Any) -> Optional[str]:
     except Exception:
         return None
 
-
-# ---------------------------
-# Glavna obrada
-# ---------------------------
-
 def process_events_with_teams(events: List[Any]) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Ulaz: lista 'events' (mješavina dict/string – štitimo se od krivih tipova)
-    Izlaz: {"matches": [...], "teams": [...]}
-    """
     matches: List[Dict[str, Any]] = []
     teams:   List[Dict[str, Any]] = []
 
     if not events:
         return {"matches": [], "teams": []}
 
+    now_iso = datetime.now(timezone.utc).isoformat()
+
     for ev in events:
-        # zaštita protiv 'str' i sličnog što je rušilo: "'str' object has no attribute 'get'"
         if not isinstance(ev, dict):
             continue
 
         raw_status = ev.get("status") or {}
-        status = clamp_to_db(map_status(raw_status))
+        mapped_status = map_status(raw_status)
 
         home = ev.get("homeTeam") or ev.get("home") or {}
         away = ev.get("awayTeam") or ev.get("away") or {}
@@ -86,30 +69,29 @@ def process_events_with_teams(events: List[Any]) -> Dict[str, List[Dict[str, Any
         start_time_iso = _to_iso_utc(ev.get("startTimestamp") or ev.get("startTime"))
         minute = _extract_minute(ev)
 
-        # SofaScore event id (služi za deduplikaciju na (source, source_event_id))
+        # vremenska korekcija statusa (blaga, DB cleanup pokriva sve ostalo)
+        coerced = coerce_status_with_time(mapped_status, start_time_iso)
+
         source_event_id = ev.get("id")
 
-        # Sastavi match zapis – bez ručnog postavljanja 'id' (DB će ga generirati)
         match_row: Dict[str, Any] = {
             "home_team": home_name,
             "away_team": away_name,
             "home_score": home_score,
             "away_score": away_score,
-            "start_time": start_time_iso,               # timestamptz prima ISO string
-            "status": status,                           # u skladu s DB CHECK-om
-            "status_type": status,                      # zadržavamo isto radi jednostavnosti
+            "start_time": start_time_iso,
+            "status": clamp_to_db(coerced),
+            "status_type": clamp_to_db(coerced),
             "competition": str(tournament.get("name") or ""),
             "source": "sofascore",
             "source_event_id": source_event_id,
             "minute": minute,
+            "updated_at": now_iso,  # ⚠️ NOVO: za dedupe tie-breaker
         }
-        # izbaci None vrijednosti da payload bude clean
         match_row = {k: v for k, v in match_row.items() if v is not None}
         matches.append(match_row)
 
-        # Minimalni team zapisi (za zaseban upsert u teams tablicu)
         def _team_row(t: Dict[str, Any]) -> Dict[str, Any]:
-            # t može biti prazan dict – _safe_team_name će to pokriti
             country = t.get("country") if isinstance(t.get("country"), dict) else {}
             return {
                 "name": _safe_team_name(t),
@@ -124,12 +106,10 @@ def process_events_with_teams(events: List[Any]) -> Dict[str, List[Dict[str, Any
         if isinstance(away, dict):
             teams.append(_team_row(away))
 
-    # uniq teams po sofascore_id ako postoji, inače po name
     uniq: Dict[Any, Dict[str, Any]] = {}
     for t in teams:
         key = t.get("sofascore_id") or t.get("name")
         if key and key not in uniq:
-            # očisti None vrijednosti
             clean = {k: v for k, v in t.items() if v not in (None, "", [])}
             uniq[key] = clean
 
@@ -137,12 +117,7 @@ def process_events_with_teams(events: List[Any]) -> Dict[str, List[Dict[str, Any
     logger.info(f"✅ Processed {len(out['matches'])} matches, {len(out['teams'])} unique teams")
     return out
 
-
 def prepare_for_database(processed: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Dodatna sanitizacija prije slanja u DB.
-    Zadržavamo samo dozvoljena polja i čistimo None.
-    """
     if not processed:
         return {"matches": [], "teams": []}
 
@@ -158,14 +133,12 @@ def prepare_for_database(processed: Dict[str, List[Dict[str, Any]]]) -> Dict[str
         "home_color", "away_color",
         "current_period_start",
         "league_priority",
-        "updated_at",
+        "updated_at",  # ⚠️ zadržavamo
     }
 
     clean_matches: List[Dict[str, Any]] = []
     for m in processed.get("matches", []):
-        # clamp status ako je slučajno promijenjen nizvodno
         m["status"] = clamp_to_db(m.get("status"))
-        # izbaci sve što nije očekivano i None vrijednosti
         clean = {k: v for k, v in m.items() if k in allowed_match_fields and v is not None}
         clean_matches.append(clean)
 
