@@ -1,271 +1,409 @@
 # scraper/fetch_loop.py
 from __future__ import annotations
 
-import time
+import asyncio
+import os
 import sys
-import signal
+import time
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-try:
-    from tqdm import tqdm
-    HAS_TQDM = True
-except ImportError:
-    HAS_TQDM = False
+# Path setup
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "scraper"))
 
 from core.database import db
-from core.browser import BrowserManager
-from scrapers.live_scraper import LiveScraper
-from scrapers.scheduled_scraper import ScheduledScraper
-from processors import process_events_with_teams, prepare_for_database
+from core.browser import Browser
 from utils.logger import get_logger
+from processors import MatchProcessor, stats_processor
 
 logger = get_logger(__name__)
 
+class FetchLoop:
+    """
+    Jednostavan 4-fazni loop: fetch → enrich → process → store
+    Posebno pazi da 'enriched' format bude ono što MatchProcessor očekuje.
+    """
 
-class ContinuousScraper:
-    def __init__(self):
-        self.browser: BrowserManager | None = None
-        self.running = True
-        self.stats = {
-            "total_runs": 0,
-            "successful_runs": 0,
-            "failed_runs": 0,
-            "total_matches_processed": 0,
-            "total_teams_processed": 0,
-            "current_live_count": 0,
-        }
-        signal.signal(signal.SIGINT, self._sig)
-        signal.signal(signal.SIGTERM, self._sig)
+    def __init__(self, max_events: int = 50):
+        self.max_events = max_events
+        self.browser: Optional[Browser] = None
 
-    def _sig(self, *_):
-        print("\n🛑 Stopping scraper gracefully...")
-        self.running = False
-
-    def _get_adaptive_interval(self, live_count: int, consecutive_failures: int) -> int:
-        if live_count > 50:
-            base = 10
-        elif live_count > 20:
-            base = 15
-        elif live_count > 5:
-            base = 20
-        elif live_count > 0:
-            base = 25
-        else:
-            base = 45
-        return min(base + consecutive_failures * 5, 60)
-
-    def _setup(self) -> bool:
+    async def run_cycle(self) -> Dict[str, Any]:
+        start = time.time()
+        logger.info("🔄 Starting new fetch cycle...")
         try:
-            if not db.health_check():
-                logger.error("❌ Database health check failed")
-                return False
-            if not self.browser:
-                self.browser = BrowserManager()  # kreiraj svježe
-            return True
+            raw_events = await self._fetch_phase()
+            if not raw_events:
+                logger.info("📭 No events to process")
+                return {"success": True, "processed": 0, "stored": 0, "duration": time.time() - start}
+
+            enriched = await self._enrich_phase(raw_events)
+            bundle = self._processing_phase(enriched)
+            results = await self._storage_phase(bundle)
+
+            dur = time.time() - start
+            logger.info(f"✅ Cycle completed in {dur:.2f}s → stored={results.get('total_stored',0)}")
+            return {"success": True, "processed": len(enriched), "stored": results.get("total_stored", 0), "duration": dur, "details": results}
         except Exception as e:
-            logger.error(f"❌ Setup failed: {e}")
-            # ako je browser napola srušen, prisilno ga poništi
-            try:
-                if self.browser:
+            logger.error(f"❌ Fetch cycle failed: {e}")
+            return {"success": False, "error": str(e)}
+        finally:
+            if self.browser:
+                try:
                     self.browser.close()
-            except Exception:
-                pass
-            self.browser = None
-            return False
+                except:
+                    pass
+                self.browser = None
 
+    async def _fetch_phase(self) -> List[Dict[str, Any]]:
+        logger.info("📡 Phase 1: Fetching raw events...")
+        self.browser = Browser()
+        out: List[Dict[str, Any]] = []
 
-    def _cleanup_old(self):
+        def _take_events(payload):
+            if not payload:
+                return []
+            if isinstance(payload, dict) and "events" in payload:
+                return payload.get("events") or []
+            if isinstance(payload, list):
+                return payload
+            return []
+
         try:
-            if self.stats["total_runs"] % 10 == 0:
-                db.cleanup_zombie_matches(hours_old=3)
-        except Exception as e:
-            logger.warning(f"Cleanup failed: {e}")
+            live_data = self._safe_fetch("events/live")
+            out += _take_events(live_data)
 
-    def _fetch(self) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        try:
-            live = LiveScraper(self.browser).scrape()
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            sched = ScheduledScraper(self.browser, today).scrape()
-            return live, sched
+            today = datetime.now(timezone.utc).date().isoformat()
+            sched = self._safe_fetch(f"scheduled-events/{today}")
+            out += _take_events(sched)
+
+            if len(out) > self.max_events:
+                out = out[: self.max_events]
+                logger.info(f"⚡ Limited to {self.max_events} events")
+
+            logger.info(f"📦 Fetched {len(out)} raw events")
+            return out
         except Exception as e:
             logger.error(f"❌ Fetch failed: {e}")
-            return [], []
+            return []
 
-    def _process(self, live, sched) -> Dict[str, List[Dict[str, Any]]]:
-        raw = [e for e in (live + sched) if isinstance(e, dict)]
-        if not raw:
-            return {"matches": [], "teams": []}
-        processed = process_events_with_teams(raw)
-        return prepare_for_database(processed)
-
-    def _store(self, data: Dict[str, Any]) -> Tuple[int, int]:
-        teams = data.get("teams") or []
-        if teams:
+    async def _enrich_phase(self, raw_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        logger.info(f"🔍 Phase 2: Enriching {len(raw_events)} events...")
+        enriched: List[Dict[str, Any]] = []
+        for i, ev in enumerate(raw_events):
             try:
-                ok, fail = db.upsert_teams(teams)
-                self.stats["total_teams_processed"] += ok
-                if ok:
-                    print(f"🏠 {ok} teams processed")
-                if fail:
-                    print(f"⚠️ {fail} teams failed")
+                ev_id = self._extract_event_id(ev)
+                if not ev_id:
+                    continue
+                row = {"event": ev, "event_id": ev_id}
+
+                # lineups (+ formations + team ids)
+                lu = self._safe_fetch(f"event/{ev_id}/lineups")
+                if lu:
+                    row["lineups"] = self._parse_lineups(lu)
+                    row["homeFormation"] = self._extract_formation(lu, "home")
+                    row["awayFormation"] = self._extract_formation(lu, "away")
+                    row["home_team_sofa"] = self._extract_team_id(lu, "home")
+                    row["away_team_sofa"] = self._extract_team_id(lu, "away")
+
+                # incidents
+                inc = self._safe_fetch(f"event/{ev_id}/incidents")
+                if inc:
+                    row["events"] = self._parse_incidents(inc)
+
+                # stats (raw – kasnije pretvori StatsProcessor)
+                st = self._safe_fetch(f"event/{ev_id}/statistics")
+                if st:
+                    row["_raw_statistics"] = st
+
+                pst = self._safe_fetch(f"event/{ev_id}/player-statistics")
+                if pst:
+                    row["_raw_player_stats"] = pst
+
+                # managers (nije nužno, ali zgodno)
+                mgr = self._safe_fetch(f"event/{ev_id}/managers")
+                if mgr:
+                    row["managers"] = self._parse_managers(mgr)
+
+                enriched.append(row)
             except Exception as e:
-                logger.warning(f"Team storage failed: {e}")
+                logger.warning(f"⚠️ Enrich failed for event #{i+1}: {e}")
+        logger.info(f"✅ Enriched {len(enriched)} events")
+        return enriched
 
-        matches = data.get("matches") or []
-        if not matches:
-            return 0, 0
-
+    def _processing_phase(self, enriched_events: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        logger.info(f"⚙️ Phase 3: Processing {len(enriched_events)} enriched events...")
         try:
-            ok, fail = db.batch_upsert_matches(matches)
-            if ok:
-                print(f"💾 {ok} matches stored successfully")
-            if fail:
-                print(f"❌ {fail} matches failed to store")
-            self.stats["total_matches_processed"] += ok
-            return ok, fail
+            mp = MatchProcessor()
+            bundle = mp.process(enriched_events)
+
+            # dodatno: pretvori raw stats kroz StatsProcessor
+            all_match_stats, all_player_stats = [], []
+            for ee in enriched_events:
+                eid = ee.get("event_id")
+                if ee.get("_raw_statistics"):
+                    all_match_stats.extend(stats_processor.process_match_stats(ee["_raw_statistics"], eid))
+                if ee.get("_raw_player_stats"):
+                    all_player_stats.extend(stats_processor.process_player_stats(ee["_raw_player_stats"], eid))
+
+            if all_match_stats:
+                bundle["match_stats"] = all_match_stats
+            if all_player_stats:
+                bundle["player_stats"] = all_player_stats
+
+            # log
+            for k in ("competitions", "teams", "players", "matches", "lineups", "formations", "events", "player_stats", "match_stats"):
+                logger.info(f"   • {k}: {len(bundle.get(k, []))}")
+            return bundle
         except Exception as e:
-            logger.error(f"❌ Match storage failed: {e}")
-            return 0, len(matches)
-
-    def run_single_cycle(self) -> bool:
-        t0 = time.time()
-        try:
-            if not self._setup():
-                return False
-            self._cleanup_old()
-            live, sched = self._fetch()
-            data = self._process(live, sched)
-
-            if not data.get("matches"):
-                logger.warning("⚠️ No matches processed")
-                return False
-
-            ok, fail = self._store(data)
-
-            total = len(data.get("matches", []))
-            sr = (ok / total) * 100 if total else 0.0
-            self.stats["current_live_count"] = len(live)
-
-            if sr < 70:
-                logger.warning(f"⚠️ Low success rate ({sr:.1f}%)!")
-                return False
-
-            elapsed = time.time() - t0
-            print(
-                f"✅ Cycle #{self.stats['total_runs'] + 1}: "
-                f"{'🔴 ' + str(len(live)) + ' live' if live else '⚫ no live'}, "
-                f"{len(sched)} scheduled, "
-                f"{len(data.get('teams', []))} teams → {ok}/{total} stored "
-                f"({sr:.1f}%, {elapsed:.1f}s)"
-            )
-            return True
-        except Exception as e:
-            logger.error(f"❌ Cycle failed: {e}")
             import traceback
-            traceback.print_exc()
-            # 🆕 hard reset browsera – ponekad je najbrže riješiti invalid session
-            try:
-                if self.browser:
-                    self.browser.close()
-            except Exception:
-                pass
-            self.browser = None
-            return False
+            logger.error(f"❌ Processing phase failed: {e}")
+            logger.error(traceback.format_exc())
+            return {k: [] for k in ("competitions","teams","players","matches","lineups","formations","events","player_stats","match_stats")}
 
-    def run_continuous(self, base_interval: int = 30):
-        print("🚀 Starting Clean Football Scraper...")
-        print("⏰ Adaptive intervals: 10s-60s based on live matches")
-        print("🔴 More live matches = faster refresh")
-        print("🏠 Automatic team creation and linking")
-        print("📊 Source tracking with SofaScore IDs")
-        print("=" * 60)
-
-        fails = 0
-        MAX_FAILS = 5
+    async def _storage_phase(self, bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+        logger.info("💾 Phase 4: Storing in database...")
+        res: Dict[str, Any] = {}
+        total = 0
 
         try:
-            while self.running:
-                self.stats["total_runs"] += 1
+            comps = bundle.get("competitions", [])
+            if comps:
+                ok, fail = db.upsert_competitions(comps)
+                res["competitions"] = {"ok": ok, "fail": fail}; total += ok
+                logger.info(f"✅ competitions: ok={ok}, fail={fail}")
 
-                if fails >= MAX_FAILS:
-                    print(f"⚠️ Too many failures ({fails}), pausing 2 minutes...")
-                    time.sleep(120)
-                    fails = 0
+            teams = bundle.get("teams", [])
+            if teams:
+                ok, fail = db.upsert_teams(teams)
+                res["teams"] = {"ok": ok, "fail": fail}; total += ok
+                logger.info(f"✅ teams:        ok={ok}, fail={fail}")
 
-                print(f"🔄 Cycle #{self.stats['total_runs']}...")
-                ok = self.run_single_cycle()
+            # mappings
+            team_map = db.get_team_ids_by_sofa([t["sofascore_id"] for t in teams]) if teams else {}
+            comp_map: Dict[Any, Any] = {}
+            if comps:
+                try:
+                    client = getattr(db, "client", None)
+                    if client:
+                        ids = [c["sofascore_id"] for c in comps]
+                        q = client.table("competitions").select("id,sofascore_id").in_("sofascore_id", ids).execute()
+                        comp_map = {r["sofascore_id"]: r["id"] for r in (q.data or [])}
+                except Exception as e:
+                    logger.warning(f"⚠️ competition mapping failed: {e}")
 
-                if ok:
-                    self.stats["successful_runs"] += 1
-                    fails = 0
-                else:
-                    self.stats["failed_runs"] += 1
-                    fails += 1
+            # players → team backfill: assign team_id to players based on lineups
+            # Only run if we have both teams and players and at least one lineup
+            lineups_for_backfill = bundle.get("lineups", [])
+            players_for_team_update: List[Dict[str, Any]] = []
+            if team_map and lineups_for_backfill:
+                for r in lineups_for_backfill:
+                    ts = r.get("team_sofascore_id")
+                    ps = r.get("player_sofascore_id")
+                    if ts and ps and ts in team_map:
+                        players_for_team_update.append({
+                            "sofascore_id": ps,
+                            "team_id": team_map[ts],
+                        })
+            if players_for_team_update:
+                try:
+                    ok_upd, fail_upd = db.backfill_players_team(players_for_team_update)
+                    logger.info(f"✅ player team backfill: updated={ok_upd}, skipped={fail_upd}")
+                except Exception as e:
+                    logger.warning(f"⚠️ player team backfill failed: {e}")
 
-                if not self.running:
-                    break
+            # players must be inserted before matches so that we can map
+            # player_ids for lineups and statistics.  Upsert them here.
+            players = bundle.get("players", [])
+            if players:
+                ok, fail = db.upsert_players(players)
+                res["players"] = {"ok": ok, "fail": fail}; total += ok
+                logger.info(f"✅ players:      ok={ok}, fail={fail}")
 
-                live_cnt = self.stats["current_live_count"]
-                interval = self._get_adaptive_interval(live_cnt, fails)
-                mode = "🚨 HIGH-LOAD" if live_cnt > 20 else ("🔴 FAST" if live_cnt > 0 else "⚫ IDLE")
-                print(f"{mode}: {live_cnt} live → {interval}s interval")
+            # matches
+            matches = bundle.get("matches", [])
+            if matches:
+                for m in matches:
+                    if (cid := m.get("competition_sofascore_id")) in comp_map:
+                        m["competition_id"] = comp_map[cid]
+                    if (hs := m.get("home_team_sofascore_id")) in team_map:
+                        m["home_team_id"] = team_map[hs]
+                    if (as_ := m.get("away_team_sofascore_id")) in team_map:
+                        m["away_team_id"] = team_map[as_]
+                ok, fail = db.batch_upsert_matches(matches)
+                res["matches"] = {"ok": ok, "fail": fail}; total += ok
+                logger.info(f"✅ matches:      ok={ok}, fail={fail}")
 
-                if self.stats["total_runs"] % 5 == 0:
-                    overall = (self.stats["successful_runs"] / self.stats["total_runs"]) * 100
-                    print(
-                        f"📊 Overall: {overall:.1f}% success, "
-                        f"{self.stats['total_matches_processed']} matches, "
-                        f"{self.stats['total_teams_processed']} teams"
-                    )
+            # get match map for FKs
+            match_map = db.get_match_ids_by_source_ids(
+                [(m["source"], m["source_event_id"]) for m in matches if m.get("source") and m.get("source_event_id")]
+            ) if matches else {}
+            player_map = db.get_player_ids_by_sofa(
+                [p["sofascore_id"] for p in bundle.get("players", [])]
+            ) if bundle.get("players") else {}
 
-                if HAS_TQDM:
-                    for _ in tqdm(range(interval), desc="Next cycle", unit="s"):
-                        if not self.running:
-                            break
-                        time.sleep(1)
-                else:
-                    for _ in range(interval):
-                        if not self.running:
-                            break
-                        time.sleep(1)
+            # lineups
+            lineups = bundle.get("lineups", [])
+            if lineups:
+                for r in lineups:
+                    tup = (r.get("source"), r.get("source_event_id"))
+                    if tup in match_map:
+                        r["match_id"] = match_map[tup]
+                    if (ts := r.get("team_sofascore_id")) in team_map:
+                        r["team_id"] = team_map[ts]
+                    if (ps := r.get("player_sofascore_id")) in player_map:
+                        r["player_id"] = player_map[ps]
+                ok, fail = db.upsert_lineups(lineups)
+                res["lineups"] = {"ok": ok, "fail": fail}; total += ok
+                logger.info(f"✅ lineups:      ok={ok}, fail={fail}")
 
-        except KeyboardInterrupt:
-            print("\n🛑 Scraper stopped by user")
-        finally:
-            self._cleanup()
+            # formations
+            forms = bundle.get("formations", [])
+            if forms:
+                for r in forms:
+                    tup = (r.get("source"), r.get("source_event_id"))
+                    if tup in match_map:
+                        r["match_id"] = match_map[tup]
+                    if (ts := r.get("team_sofascore_id")) in team_map:
+                        r["team_id"] = team_map[ts]
+                ok, fail = db.upsert_formations(forms)
+                res["formations"] = {"ok": ok, "fail": fail}; total += ok
+                logger.info(f"✅ formations:   ok={ok}, fail={fail}")
 
-    def _cleanup(self):
-        print("\n🧹 Cleaning up resources...")
-        try:
-            if self.browser:
-                self.browser.close()
+            # events
+            mev = bundle.get("events", [])
+            if mev:
+                for r in mev:
+                    tup = (r.get("source"), r.get("source_event_id"))
+                    if tup in match_map:
+                        r["match_id"] = match_map[tup]
+                ok, fail = db.upsert_match_events(mev)
+                res["events"] = {"ok": ok, "fail": fail}; total += ok
+                logger.info(f"✅ events:       ok={ok}, fail={fail}")
+
+            # player stats
+            pstats = bundle.get("player_stats", [])
+            if pstats:
+                for r in pstats:
+                    tup = (r.get("source"), r.get("source_event_id"))
+                    if tup in match_map:
+                        r["match_id"] = match_map[tup]
+                    if (ps := r.get("player_sofascore_id")) in player_map:
+                        r["player_id"] = player_map[ps]
+                ok, fail = db.upsert_player_stats(pstats)
+                res["player_stats"] = {"ok": ok, "fail": fail}; total += ok
+                logger.info(f"✅ player_stats: ok={ok}, fail={fail}")
+
+            # match stats
+            mstats = bundle.get("match_stats", [])
+            if mstats:
+                for r in mstats:
+                    tup = (r.get("source"), r.get("source_event_id"))
+                    if tup in match_map:
+                        r["match_id"] = match_map[tup]
+                ok, fail = db.upsert_match_stats(mstats)
+                res["match_stats"] = {"ok": ok, "fail": fail}; total += ok
+                logger.info(f"✅ match_stats:  ok={ok}, fail={fail}")
+
+            res["total_stored"] = total
+            return res
         except Exception as e:
-            logger.warning(f"Browser cleanup failed: {e}")
+            logger.error(f"❌ Storage phase failed: {e}")
+            res["total_stored"] = total
+            res["error"] = str(e)
+            return res
 
-        print("\n" + "=" * 50)
-        print("📊 SCRAPER STATISTICS")
-        print("=" * 50)
-        print(f"Total Cycles: {self.stats['total_runs']}")
-        print(f"Successful: {self.stats['successful_runs']}")
-        print(f"Failed: {self.stats['failed_runs']}")
-        if self.stats["total_runs"] > 0:
-            rate = (self.stats["successful_runs"] / self.stats["total_runs"]) * 100
-            print(f"Success Rate: {rate:.1f}%")
-        print(f"Total Matches: {self.stats['total_matches_processed']:,}")
-        print(f"Total Teams: {self.stats['total_teams_processed']:,}")
-        print("=" * 50)
-        print("🚀 Clean scraper stopped gracefully!")
+    # ----------------- helpers -----------------
+    def _safe_fetch(self, endpoint: str) -> Optional[Dict[str, Any]]:
+        if not self.browser:
+            return None
+        try:
+            return self.browser.fetch_data(endpoint)
+        except Exception as e:
+            logger.warning(f"⚠️ fetch failed for {endpoint}: {e}")
+            return None
+
+    def _extract_event_id(self, ev: Dict[str, Any]) -> Optional[int]:
+        for k in ("id", "eventId", "sofaEventId"):
+            if ev.get(k) is not None:
+                try:
+                    return int(ev[k])
+                except Exception:
+                    pass
+        return None
+
+    def _parse_lineups(self, data: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+        res = {"home": [], "away": []}
+        for side in ("home", "away"):
+            side_data = data.get(side) or {}
+            for row in side_data.get("players") or []:
+                pl = row.get("player") or {}
+                res[side].append({
+                    "player": {"id": pl.get("id"), "name": pl.get("name")},
+                    "jerseyNumber": row.get("jerseyNumber"),
+                    "position": row.get("position"),
+                    "isCaptain": bool(row.get("isCaptain")),
+                    "isStarting": bool(row.get("isStarting")),
+                })
+        return res
+
+    def _extract_formation(self, data: Dict[str, Any], side: str) -> Optional[str]:
+        node = data.get(side) or {}
+        return node.get("formation")
+
+    def _extract_team_id(self, data: Dict[str, Any], side: str) -> Optional[int]:
+        node = data.get(side) or {}
+        t = node.get("team") or {}
+        return t.get("id")
+
+    def _parse_incidents(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        res: List[Dict[str, Any]] = []
+        incs = data.get("incidents") or []
+        for inc in incs:
+            side = "home" if inc.get("isHome") else "away"
+            minute = None
+            if isinstance(inc.get("time"), dict):
+                minute = inc["time"].get("minute")
+            minute = minute or inc.get("minute")
+            pl = inc.get("player") or {}
+            res.append({
+                "minute": minute,
+                "type": inc.get("incidentType"),
+                "team": side,
+                "player_name": pl.get("name"),
+                "description": inc.get("text"),
+                "card_color": inc.get("color"),
+            })
+        return res
+
+    def _parse_managers(self, data: Dict[str, Any]):
+        out = {"home": None, "away": None}
+        for side in ("home", "away"):
+            m = data.get(side) or data.get(f"{side}Manager")
+            if isinstance(m, dict):
+                out[side] = {"id": m.get("id"), "name": m.get("name")}
+        return out
 
 
-def main():
-    try:
-        ContinuousScraper().run_continuous(base_interval=30)
-    except Exception as e:
-        print(f"❌ CRITICAL ERROR: {e}")
-        logger.error(f"Critical failure: {e}")
-        sys.exit(1)
-
+# ------------- standalone -------------
+async def main():
+    logger.info("🚀 Starting FetchLoop...")
+    db.health_check()
+    loop = FetchLoop(max_events=20)
+    while True:
+        try:
+            res = await loop.run_cycle()
+            if res.get("success"):
+                logger.info(f"📊 processed={res.get('processed')} stored={res.get('stored')}")
+            await asyncio.sleep(30)
+        except KeyboardInterrupt:
+            logger.info("👋 Shutting down...")
+            break
+        except Exception as e:
+            logger.error(f"❌ Unexpected error: {e}")
+            await asyncio.sleep(60)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

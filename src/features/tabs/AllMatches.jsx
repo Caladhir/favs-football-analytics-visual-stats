@@ -1,7 +1,8 @@
-// src/features/tabs/AllMatches.jsx - WITH TIME SORT BUTTON
+// Unified All Matches tab (single view) with strong dedupe and smart/time sorting
 import React, { useState, useMemo } from "react";
 import { useAutoRefresh } from "../../hooks/useAutoRefresh";
 import { useAllMatches } from "../../hooks/useAllMatches";
+
 import {
   sortMatches,
   groupMatchesByCompetition,
@@ -9,9 +10,12 @@ import {
   getLeaguePriority,
   isUserFavorite,
 } from "../../utils/matchSortingUtils";
-import { getValidLiveMatches } from "../../utils/matchStatusUtils";
+import {
+  getValidLiveMatches,
+  normalizeStatus,
+} from "../../utils/matchStatusUtils";
 
-// Components
+// UI
 import AllMatchesHeader from "../../features/all_matches/AllMatchesHeader";
 import MatchesGrid from "../../ui/MatchesGrid";
 import AllMatchesDebug from "../../features/all_matches/AllMatchesDebug";
@@ -20,74 +24,127 @@ import LoadingState from "../../ui/LoadingState";
 import ErrorState from "../../ui/ErrorState";
 import TimeSortButton, { applyTimeSort } from "../../ui/TimeSortButton";
 
-/**
- * Ukloni duplikate iz lista utakmica
- */
-function removeDuplicates(matches) {
+/* ---------------------------------------------
+   DEDUPE: spajaj duplikate (live + scheduled)
+   ključ = (home, away, start_time[min], competition)
+   preferiraj: bolji status > noviji updated_at > source=sofascore
+--------------------------------------------- */
+
+const STATUS_RANK = {
+  live: 4,
+  inprogress: 4,
+  ht: 3,
+  halftime: 3,
+  finished: 2,
+  ft: 2,
+  full_time: 2,
+  afterextra: 2,
+  aet: 2,
+  penalties: 2,
+  postponed: 1,
+  canceled: 1,
+  cancelled: 1,
+  upcoming: 0,
+  scheduled: 0,
+  notstarted: 0,
+  not_started: 0,
+  ns: 0,
+};
+
+function rankStatus(s) {
+  return STATUS_RANK[(s || "").toString().toLowerCase()] ?? 0;
+}
+
+function minuteKey(iso) {
+  const t = new Date(iso);
+  if (!Number.isFinite(t.getTime())) return "0";
+  return String(Math.round(t.getTime() / 60000)); // round to minute
+}
+
+function safeLower(s) {
+  return (s || "").toString().toLowerCase().trim();
+}
+
+function makeKey(m) {
+  return [
+    safeLower(m.home_team),
+    safeLower(m.away_team),
+    minuteKey(m.start_time),
+    safeLower(m.competition),
+  ].join("|");
+}
+
+function chooseBetter(a, b) {
+  // 1) bolji status
+  const rsA = rankStatus(a.status || a.status_type);
+  const rsB = rankStatus(b.status || b.status_type);
+  if (rsB > rsA) return b;
+  if (rsA > rsB) return a;
+
+  // 2) noviji updated_at
+  const ua = new Date(a.updated_at || a.last_seen_at || 0).getTime();
+  const ub = new Date(b.updated_at || b.last_seen_at || 0).getTime();
+  if (ub > ua) return b;
+  if (ua > ub) return a;
+
+  // 3) preferiraj sofascore
+  const sa = (a.source || "").toLowerCase();
+  const sb = (b.source || "").toLowerCase();
+  if (sb === "sofascore" && sa !== "sofascore") return b;
+  if (sa === "sofascore" && sb !== "sofascore") return a;
+
+  // 4) fallback: ostavi a
+  return a;
+}
+
+function dedupeByTeamsTime(list = []) {
   const seen = new Map();
-  const deduped = [];
-
-  for (const match of matches) {
-    const key = [
-      match.id,
-      match.home_team?.toLowerCase()?.trim(),
-      match.away_team?.toLowerCase()?.trim(),
-      match.start_time,
-      match.competition?.toLowerCase()?.trim(),
-    ]
-      .filter(Boolean)
-      .join("|");
-
-    if (!seen.has(key)) {
-      seen.set(key, match);
-      deduped.push(match);
-    } else {
-      // Zadržaj noviji update
-      const existing = seen.get(key);
-      const existingUpdate = new Date(existing.updated_at || 0);
-      const currentUpdate = new Date(match.updated_at || 0);
-
-      if (currentUpdate > existingUpdate) {
-        const index = deduped.findIndex((m) => seen.get(key) === m);
-        if (index !== -1) {
-          deduped[index] = match;
-          seen.set(key, match);
-        }
-      }
+  for (const m of list) {
+    const k = makeKey(m);
+    const prev = seen.get(k);
+    if (!prev) {
+      seen.set(k, m);
+      continue;
     }
+    seen.set(k, chooseBetter(prev, m));
   }
-
-  const duplicatesRemoved = matches.length - deduped.length;
-  if (duplicatesRemoved > 0 && import.meta.env.DEV) {
+  const deduped = Array.from(seen.values());
+  if (import.meta.env.DEV && list.length !== deduped.length) {
     console.log(
-      `🔧 AllMatches: Removed ${duplicatesRemoved} duplicate matches`
+      `🔧 AllMatches dedupe: ${list.length} → ${deduped.length} (-${
+        list.length - deduped.length
+      })`
     );
   }
-
   return deduped;
 }
 
-export default function AllMatches() {
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [groupByCompetition, setGroupByCompetition] = useState(false);
-  const [timeSortType, setTimeSortType] = useState("smart"); // 🆕 NEW
+/* --------------------------------------------- */
 
-  // Custom hooks
+export default function AllMatches() {
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+
+  const [groupByCompetition, setGroupByCompetition] = useState(false);
+  const [timeSortType, setTimeSortType] = useState("smart"); // "smart" | "chronological" | "reverse-chronological"
+
   const userPreferences = useUserPreferences();
   const { matches, loading, backgroundRefreshing, handleAutoRefresh, error } =
     useAllMatches(selectedDate);
 
-  // 🔧 STEP 1: Remove duplicates first
-  const dedupedMatches = useMemo(() => {
-    if (!matches || matches.length === 0) return [];
-    return removeDuplicates(matches);
-  }, [matches]);
+  // 1) DEDUPE
+  const dedupedMatches = useMemo(
+    () => dedupeByTeamsTime(matches || []),
+    [matches]
+  );
 
-  // 🔧 STEP 2: Smart sorting with time sort integration
+  // 2) SMART SORT + optional time sort
   const sortedMatches = useMemo(() => {
-    if (!dedupedMatches || dedupedMatches.length === 0) return [];
+    if (!dedupedMatches.length) return [];
 
-    // First apply smart sorting
     const smartSorted = sortMatches(dedupedMatches, {
       prioritizeUserFavorites: userPreferences.sortingEnabled,
       favoriteTeams: userPreferences.favoriteTeams,
@@ -96,35 +153,41 @@ export default function AllMatches() {
       debugMode: import.meta.env.DEV,
     });
 
-    // Then apply time sorting
-    const finalSorted = applyTimeSort(smartSorted, timeSortType);
-    return finalSorted;
-  }, [dedupedMatches, userPreferences, timeSortType]); // 🆕 Added timeSortType
+    return applyTimeSort(smartSorted, timeSortType);
+  }, [dedupedMatches, userPreferences, timeSortType]);
 
-  // 🔧 STEP 3: Group by competition if enabled
+  // 3) Optional group by competition
   const groupedMatches = useMemo(() => {
     if (!groupByCompetition || !sortedMatches.length) return null;
     return groupMatchesByCompetition(sortedMatches);
   }, [sortedMatches, groupByCompetition]);
 
-  // 🔧 STEP 4: Calculate statistics
+  // 4) Stats (nakon dedupe + sort)
   const stats = useMemo(() => {
     if (!sortedMatches.length) return null;
 
     const liveMatches = getValidLiveMatches(sortedMatches);
-    const upcomingMatches = sortedMatches.filter((m) =>
-      ["upcoming", "notstarted", "scheduled"].includes(m.status?.toLowerCase())
-    );
-    const finishedMatches = sortedMatches.filter((m) =>
-      [
+    const upcomingMatches = sortedMatches.filter((m) => {
+      const s = normalizeStatus(m.status || m.status_type);
+      return [
+        "upcoming",
+        "scheduled",
+        "notstarted",
+        "not_started",
+        "ns",
+      ].includes(s);
+    });
+    const finishedMatches = sortedMatches.filter((m) => {
+      const s = normalizeStatus(m.status || m.status_type);
+      return [
         "finished",
         "ft",
         "full_time",
-        "ended",
         "afterextra",
+        "aet",
         "penalties",
-      ].includes(m.status?.toLowerCase())
-    );
+      ].includes(s);
+    });
     const topLeaguesCount = sortedMatches.filter(
       (m) => getLeaguePriority(m.competition) > 80
     ).length;
@@ -146,10 +209,9 @@ export default function AllMatches() {
     };
   }, [sortedMatches, userPreferences]);
 
-  // Auto-refresh kada ima live utakmica
-  useAutoRefresh(matches, handleAutoRefresh, 30000);
+  // Auto-refresh kad ima live utakmica
+  useAutoRefresh(dedupedMatches, handleAutoRefresh, 30000);
 
-  // Loading state
   if (loading) {
     return (
       <div className="min-h-screen bg-muted rounded-3xl p-1">
@@ -163,13 +225,9 @@ export default function AllMatches() {
     );
   }
 
-  // Error state
-  if (error) {
-    return <ErrorState error={error} onRetry={handleAutoRefresh} />;
-  }
+  if (error) return <ErrorState error={error} onRetry={handleAutoRefresh} />;
 
-  // Empty state
-  if (matches.length === 0) {
+  if (!dedupedMatches.length) {
     return (
       <EmptyAllMatches
         selectedDate={selectedDate}
@@ -179,52 +237,37 @@ export default function AllMatches() {
     );
   }
 
-  // Main render
   return (
     <div className="min-h-screen bg-muted rounded-3xl p-1">
-      {/* Header with calendar */}
       <AllMatchesHeader
         selectedDate={selectedDate}
         setSelectedDate={setSelectedDate}
-        stats={stats}
-        backgroundRefreshing={backgroundRefreshing}
-        groupByCompetition={groupByCompetition}
-        setGroupByCompetition={setGroupByCompetition}
       />
 
-      {/* 🆕 NEW: Enhanced controls with TimeSortButton */}
+      {/* Controls row */}
       <div className="text-center mb-4 space-y-3">
         {stats && (
           <div className="flex justify-center items-center gap-3 flex-wrap text-xs">
-            {/* Live indicator */}
             {stats.live > 0 && (
               <span className="bg-red-600 text-white px-2 py-1 rounded-full animate-pulse">
                 🔴 {stats.live} Live
               </span>
             )}
-
-            {/* Upcoming */}
             {stats.upcoming > 0 && (
               <span className="bg-blue-600 text-white px-2 py-1 rounded-full">
                 ⏰ {stats.upcoming} Upcoming
               </span>
             )}
-
-            {/* Finished */}
             {stats.finished > 0 && (
               <span className="bg-green-600 text-white px-2 py-1 rounded-full">
                 ✅ {stats.finished} Finished
               </span>
             )}
-
-            {/* Top leagues */}
             {stats.topLeagues > 0 && (
               <span className="bg-yellow-600 text-white px-2 py-1 rounded-full">
                 ⭐ {stats.topLeagues} Top
               </span>
             )}
-
-            {/* Favorites */}
             {stats.favorites > 0 && (
               <span className="bg-purple-600 text-white px-2 py-1 rounded-full">
                 ❤️ {stats.favorites} Favorites
@@ -233,21 +276,17 @@ export default function AllMatches() {
 
             {/* Group toggle */}
             <button
-              onClick={() => setGroupByCompetition(!groupByCompetition)}
-              className={`
-                px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-200
-                ${
-                  groupByCompetition
-                    ? "bg-green-600 text-white"
-                    : "bg-gray-600 text-white"
-                }
-                hover:scale-105 active:scale-95
-              `}
+              onClick={() => setGroupByCompetition((v) => !v)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 ${
+                groupByCompetition
+                  ? "bg-green-600 text-white"
+                  : "bg-gray-600 text-white"
+              } hover:scale-105 active:scale-95`}
             >
               {groupByCompetition ? "📋 Grouped" : "📝 Group"}
             </button>
 
-            {/* 🆕 NEW: Time Sort Button */}
+            {/* Time sort */}
             <TimeSortButton
               value={timeSortType}
               onChange={setTimeSortType}
@@ -257,7 +296,6 @@ export default function AllMatches() {
           </div>
         )}
 
-        {/* Sort type indicator */}
         {timeSortType !== "smart" && (
           <div className="text-xs text-muted-foreground">
             Sorted by:{" "}
@@ -268,7 +306,6 @@ export default function AllMatches() {
         )}
       </div>
 
-      {/* Matches grid */}
       <MatchesGrid
         groupByCompetition={groupByCompetition}
         groupedMatches={groupedMatches}
@@ -276,7 +313,6 @@ export default function AllMatches() {
         showLiveIndicator={true}
       />
 
-      {/* Manual refresh button */}
       <div className="flex justify-center items-center gap-3 mt-8 mb-4">
         <button
           onClick={handleAutoRefresh}
@@ -293,16 +329,16 @@ export default function AllMatches() {
           {backgroundRefreshing ? "Refreshing..." : "Manual Refresh"}
         </button>
 
-        {/* Quick sort toggle for mobile */}
+        {/* Quick time-sort cycle (mobile) */}
         <button
           onClick={() => {
-            const nextSort =
+            const next =
               timeSortType === "smart"
                 ? "chronological"
                 : timeSortType === "chronological"
                 ? "reverse-chronological"
                 : "smart";
-            setTimeSortType(nextSort);
+            setTimeSortType(next);
           }}
           className="md:hidden px-4 py-2 bg-muted text-foreground rounded-lg border border-border hover:bg-muted/80 transition-colors"
           title="Cycle sort type"
@@ -315,7 +351,6 @@ export default function AllMatches() {
         </button>
       </div>
 
-      {/* Debug info */}
       <AllMatchesDebug
         matches={matches}
         sortedMatches={sortedMatches}

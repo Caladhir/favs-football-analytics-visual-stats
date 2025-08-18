@@ -1,76 +1,85 @@
-// pages/app_layout/HomePage.jsx
-import { Button } from "../../ui/Button"; // prilagodi path
-import { QuickLink } from "../../features/homepage/QuickLink";
-import { FeatureCard } from "../../features/homepage/FeatureCard";
-import { TrendingPlayers } from "../../features/homepage/TrendingPlayers";
-import { HotPredictions } from "../../features/homepage/HotPredictions";
-import { StatCard } from "../../features/homepage/StatCard";
-
+// ============================================
+// src/pages/app_layout/HomePage.jsx
+// ============================================
+import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import AnimatedBackground from "../../features/homepage/AnimatedBackground";
+import GlowingText from "../../features/homepage/GlowingText";
+import LiveMatchTicker from "../../features/homepage/LiveMatchTicker";
+import QuickStatsSection from "../../features/homepage/QuickStatsSection";
+import FeaturesSection from "../../features/homepage/FeaturesSection";
+import TrendingSection from "../../features/homepage/TrendingSection";
 
 export default function HomePage() {
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    setIsLoaded(true);
+  }, []);
+
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      {/* Hero sekcija */}
-      <section className="text-center py-16 px-4">
-        <h1 className="font-black text-5xl text-primary text-outline">
-          F.A.V.S.
-        </h1>
-        <p className="text-muted-foreground mt-1 text-lg ">
-          Football Analytics & Visual Stats
-        </p>
+    <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-red-950 text-white overflow-hidden relative">
+      <AnimatedBackground />
+
+      {/* Hero Section */}
+      <section
+        className={`relative z-10 text-center py-20 px-4 transition-all duration-1000 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
+        }`}
+      >
+        <div className="mb-8">
+          <h1 className="font-black text-7xl md:text-8xl mb-4 text-red-500 animate-pulse-slow">
+            F.A.V.S.
+          </h1>
+          <p className="text-xl md:text-2xl text-gray-300 font-light tracking-wider">
+            Football Analytics & Visual Stats
+          </p>
+        </div>
+
+        {/* CTA Button with Hover Effect */}
         <Link to="/dashboard">
-          <Button className="mt-6 px-6 py-3 text-md">Počni Analizu</Button>
+          <button className="group relative px-8 py-4 bg-gradient-to-r from-red-600 to-red-700 rounded-full font-semibold text-lg overflow-hidden transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-red-500/50">
+            <span className="relative z-10">Počni Analizu</span>
+            <div className="absolute inset-0 bg-gradient-to-r from-red-700 to-red-800 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+            <div className="absolute -inset-1 bg-gradient-to-r from-red-500 to-red-600 rounded-full blur opacity-30 group-hover:opacity-50 transition-opacity duration-300" />
+          </button>
         </Link>
       </section>
 
-      {/* Brzi linkovi */}
-      <section className="flex flex-wrap justify-center gap-4 px-4">
-        <QuickLink title="Moji Timovi" />
-        <QuickLink title="Predikcije" />
-        <QuickLink title="Lige" />
-      </section>
+      {/* Live Matches Ticker - Pravi podaci */}
+      <LiveMatchTicker />
 
-      {/* Ključne funkcionalnosti */}
-      <section className="py-16 px-4">
-        <h2 className="text-2xl font-bold text-center mb-8">
-          Ključne Funkcionalnosti
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
-          <FeatureCard
-            title="Praćenje Timova"
-            desc="Dodaj omiljene timove i prati njihove performanse."
-          />
-          <FeatureCard
-            title="xG Analiza"
-            desc="Očekivani golovi, shot mapa i napredne statistike."
-          />
-          <FeatureCard
-            title="Analiza Igrača"
-            desc="Detaljne statistike performansi i usporedbe."
-          />
-        </div>
-      </section>
+      {/* Quick Stats Cards - Pravi podaci */}
+      <QuickStatsSection />
 
-      {/* Trending */}
-      <section className="bg-muted py-16 px-4">
-        <h2 className="text-2xl font-bold text-center mb-8">
-          Trending Analitika
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-5xl mx-auto">
-          <TrendingPlayers />
-          <HotPredictions />
-        </div>
-      </section>
+      {/* Feature Cards - Statične */}
+      <FeaturesSection />
 
-      {/* Statistika */}
-      <section className="py-16 px-4 text-center">
-        <h2 className="text-2xl font-bold mb-6">Trenutne Statistike</h2>
-        <div className="flex flex-wrap justify-center gap-10 text-2xl font-semibold">
-          <StatCard number="180+" label="Analizirane Utakmice" />
-          <StatCard number="12" label="HNL Timova" />
-          <StatCard number="300+" label="Praćenih Igrača" />
-          <StatCard number="95%" label="Točnost Podataka" />
+      {/* Trending Section - Pravi podaci */}
+      <TrendingSection />
+
+      {/* Footer CTA */}
+      <section className="relative z-10 text-center py-20 px-6">
+        <div className="max-w-4xl mx-auto">
+          <h2 className="text-4xl md:text-5xl font-bold mb-6 bg-gradient-to-r from-red-400 via-white to-red-400 bg-clip-text text-transparent">
+            Spremni za Naprednu Analizu?
+          </h2>
+          <p className="text-xl text-gray-300 mb-8">
+            Pridruži se tisućama korisnika koji koriste F.A.V.S. za bolje
+            razumijevanje nogometa
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Link to="/dashboard">
+              <button className="px-8 py-4 bg-red-600 hover:bg-red-700 rounded-full font-semibold text-lg transition-all duration-300 hover:scale-105">
+                Kreiraj Besplatan Račun
+              </button>
+            </Link>
+            <Link to="/matches">
+              <button className="px-8 py-4 bg-white/10 hover:bg-white/20 backdrop-blur-sm rounded-full font-semibold text-lg border border-white/20 transition-all duration-300 hover:scale-105">
+                Pregledaj Demo
+              </button>
+            </Link>
+          </div>
         </div>
       </section>
     </div>

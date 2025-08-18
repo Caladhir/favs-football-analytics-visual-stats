@@ -1,101 +1,94 @@
 # scraper/processors/status_processor.py
+from __future__ import annotations
 from typing import Any, Dict, Optional
-from datetime import datetime, timezone, timedelta
 
-ALLOWED_DB_STATUSES = {"live", "ht", "finished", "ft", "upcoming", "postponed", "canceled", "abandoned"}
-
-# Mapiranje SofaScore status.type (string) -> naš status
-TYPE_STR_MAP = {
-    "inprogress": "live",
-    "in_progress": "live",
-    "halftime": "ht",
-    "finished": "finished",
-    "ft": "finished",
+# Map raw SofaScore status strings to a limited set accepted by our DB.
+#
+# Our `matches` table accepts only the following statuses:
+#   'live', 'upcoming', 'finished', 'ht', 'ft',
+#   'postponed', 'canceled', 'abandoned', 'suspended'.
+#
+# Incoming SofaScore values are normalised by lower‑casing and removing
+# whitespace/underscores before lookup.  Any unrecognised status will
+# default to 'upcoming'.
+_STATUS_MAP = {
+    # Upcoming / not yet started
     "notstarted": "upcoming",
+    "not_started": "upcoming",
+    "prematch": "upcoming",
+    "scheduled": "upcoming",
+    "upcoming": "upcoming",
+    # Live / in‑progress
+    "live": "live",
+    "inprogress": "live",
+    "inprogresslive": "live",
+    "in_progress": "live",
+    # Half‑time – record separately
+    "halftime": "ht",
+    "ht": "ht",
+    # Full‑time / finished
+    "afterextra": "ft",
+    "penalties": "ft",
+    "finished": "ft",
+    "ended": "ft",
+    "ft": "ft",
+    "fulltime": "ft",
+    # Postponed/delayed
     "postponed": "postponed",
-    "cancelled": "canceled",
+    "delayed": "postponed",
+    # Cancelled / abandoned
     "canceled": "canceled",
+    "cancelled": "canceled",
     "abandoned": "abandoned",
-    # izvan DB-sheme -> premapiraj na dopušteno
-    "suspended": "postponed",
+    # Suspended/interrupted
+    "suspended": "suspended",
+    "interrupted": "suspended",
 }
 
-# Mapiranje SofaScore status.code (int) -> naš status
-CODE_INT_MAP = {
-    0: "upcoming",   # not started
-    1: "live",       # 1st half / in progress
-    2: "ht",         # halftime
-    3: "live",       # 2nd half
-    6: "live",       # extra time
-    7: "live",       # penalties / playing
-    60: "postponed",
-    70: "canceled",
-    100: "finished",
-    120: "finished", # after ET
-}
+def normalize_status(raw: Optional[str]) -> str:
+    """Normalise an arbitrary status string to one of the allowed values.
 
-def map_status(raw_status: Dict[str, Any]) -> str:
-    if not isinstance(raw_status, dict):
+    SofaScore uses a variety of status descriptors (e.g. "inProgress",
+    "HT", "FT", etc.).  Our database accepts only a small set defined
+    in the `_STATUS_MAP`.  Any unknown or missing status defaults to
+    'upcoming'.
+    """
+    if not raw:
         return "upcoming"
+    # Normalise by lower‑casing and removing spaces/underscores
+    key = str(raw).lower().replace(" ", "").replace("_", "")
+    return _STATUS_MAP.get(key, "upcoming")
 
-    st_type = raw_status.get("type")
-    st_code = raw_status.get("code")
-
-    if isinstance(st_type, str):
-        val = TYPE_STR_MAP.get(st_type.lower())
-        if val:
-            return val
-
-    if isinstance(st_code, int):
-        val = CODE_INT_MAP.get(st_code)
-        if val:
-            return val
-
-    desc = str(raw_status.get("description", "")).lower()
-    if "ht" in desc or "half-time" in desc:
-        return "ht"
-    if "ft" in desc or "full-time" in desc:
-        return "finished"
-
-    return "upcoming"
-
-def clamp_to_db(status: str) -> str:
-    s = (status or "").lower()
-    if s in ALLOWED_DB_STATUSES:
-        return s
-    if s in {"suspended"}:
-        return "postponed"
-    return "upcoming"
-
-def coerce_status_with_time(status: str,
-                            start_time_iso: Optional[str],
-                            now: Optional[datetime] = None,
-                            grace_before_min: int = 10,
-                            force_finish_after_h: int = 3) -> str:
-    """
-    Blagi vremenski guard:
-    - upcoming/scheduled malo prije ili malo poslije starta ostaje 'upcoming' (frontend ga ionako skriva ako je prošao).
-    - live/ht stariji od force_finish_after_h -> 'finished'
-    - upcoming stariji od force_finish_after_h -> 'finished' (fallback; glavno čišćenje radimo u DB-u)
-    """
-    base = clamp_to_db(status)
-    if not start_time_iso:
-        return base
-
-    now = now or datetime.now(timezone.utc)
+def clamp_to_db(val: Optional[int], lo: int = 0, hi: int = 999) -> Optional[int]:
+    if val is None:
+        return None
     try:
-        st = datetime.fromisoformat(start_time_iso.replace("Z", "+00:00"))
+        v = int(val)
+        return max(lo, min(hi, v))
     except Exception:
-        return base
+        return None
 
-    if base in {"live", "ht"} and now - st > timedelta(hours=force_finish_after_h):
-        return "finished"
+class StatusProcessor:
+    """Minimalist normalizacija statusa i rezultata."""
+    def parse(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        s = event.get("status", {}) or {}
+        raw_desc = s.get("description") or s.get("type") or event.get("statusType")
+        status = normalize_status(raw_desc)
 
-    if base in {"upcoming"}:
-        # ako je daleko prešlo vrijeme početka, pro-glasi finished (fallback)
-        if now - st > timedelta(hours=force_finish_after_h):
-            return "finished"
-        # u suprotnom, ostavi 'upcoming' (frontend ima stricter filter po vremenu)
-        return "upcoming"
+        # Score modeli (SofaScore često ima {current, period1, period2} ...)
+        def _score(side: str, key: str) -> Optional[int]:
+            obj = event.get(f"{side}Score") or {}
+            if isinstance(obj, dict):
+                return obj.get(key)
+            return None
 
-    return base
+        out = {
+            "status": status,
+            "home_score": clamp_to_db(_score("home", "current")),
+            "away_score": clamp_to_db(_score("away", "current")),
+            "home_score_ht": clamp_to_db(_score("home", "period1")),
+            "away_score_ht": clamp_to_db(_score("away", "period1")),
+        }
+        return out
+
+status_processor = StatusProcessor()

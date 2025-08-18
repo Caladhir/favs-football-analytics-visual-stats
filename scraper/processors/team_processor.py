@@ -1,97 +1,156 @@
 # scraper/processors/team_processor.py
-import uuid
-from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
-from core.database import db
-from utils.logger import get_logger
-
-logger = get_logger(__name__)
+from __future__ import annotations
+from typing import Any, Dict, List, Tuple
 
 class TeamProcessor:
-    """Processes team data for database storage (usklađeno s trenutačnom DB shemom)."""
+    """Vadi timove i igrače (iz lineups) u jednostavne upsert objekte."""
 
-    def __init__(self):
-        # SofaScore team id (int) -> DB UUID (str)
-        self.team_cache: Dict[int, str] = {}
+    def parse_teams(self, event: Dict[str, Any], enriched: Dict[str, Any]) -> List[Dict[str, Any]]:
+        e = event
+        teams = []
 
-    def process_teams(self, teams_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Pripremi team zapise za DB (samo kolone koje postoje u tablici teams)."""
-        if not teams_data:
-            return []
+        def _one(side: str):
+            t = (e.get(f"{side}Team") or {}) if isinstance(e.get(f"{side}Team"), dict) else {}
+            sid = enriched.get(f"{side}_team_sofa") or t.get("id")
+            if not sid:
+                return None
+            country = None
+            if isinstance(t.get("country"), dict):
+                country = t["country"].get("name")
+            return {
+                "sofascore_id": int(sid),
+                "name": t.get("name") or t.get("shortName") or "",
+                "short_name": t.get("shortName") or (t.get("name") or "")[:15],
+                "country": country,
+            }
 
-        logger.info(f"Processing {len(teams_data)} teams...")
-        processed: List[Dict[str, Any]] = []
+        for side in ("home", "away"):
+            row = _one(side)
+            if row:
+                teams.append(row)
+        return teams
 
-        for t in teams_data:
-            try:
-                sofascore_id = t.get("id")
-                name = t.get("name") or t.get("shortName") or t.get("teamName")
-                if not sofascore_id or not name:
+    def parse_players(self, enriched: Dict[str, Any]) -> List[Dict[str, Any]]:
+        out: Dict[int, Dict[str, Any]] = {}
+        lu = enriched.get("lineups") or {}
+        for side in ("home", "away"):
+            for p in lu.get(side, []) or []:
+                pl = p.get("player") or {}
+                pid = pl.get("id")
+                if not pid:
                     continue
-
-                # Deterministički UUID iz SofaScore ID-a (stabilno spajanje kroz projekte)
-                team_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"sofascore_team_{sofascore_id}"))
-                self.team_cache[int(sofascore_id)] = team_uuid
-
-                db_team = {
-                    "id": team_uuid,
-                    "name": name,
-                    "short_name": t.get("short_name") or t.get("shortName"),
-                    "country": (t.get("country") or t.get("category", {}).get("name")),
-                    "logo_url": (t.get("logo_url") or t.get("teamLogo") or t.get("crest") or t.get("image")),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "sofascore_id": int(sofascore_id),
+                out[int(pid)] = {
+                    "sofascore_id": int(pid),
+                    "full_name": pl.get("name"),
+                    "number": p.get("jerseyNumber"),
+                    "position": p.get("position"),
                 }
-                # Ukloni None vrijednosti
-                db_team = {k: v for k, v in db_team.items() if v is not None}
-                processed.append(db_team)
-            except Exception as e:
-                logger.warning(f"Failed to process team {t!r}: {e}")
+        return list(out.values())
 
-        logger.info(f"✅ Processed {len(processed)} teams for database")
-        return processed
-
-    def get_team_uuid(self, sofascore_id: int) -> Optional[str]:
-        """Vrati DB UUID za SofaScore ID (iz cachea ili iz baze)."""
+    def parse_lineups(self, enriched: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Parse player lineups for a single event.  When the `event_id` is
+        missing on the enriched object, attempt to derive it from the
+        embedded event or top‑level ID.  If no ID can be determined, no
+        lineups are returned.  This makes the parser robust against
+        upstream changes that omit `event_id` from the enriched payload.
+        """
+        out: List[Dict[str, Any]] = []
+        # Determine the event identifier from multiple possible locations.
+        raw_eid = enriched.get("event_id") or enriched.get("id")
+        if raw_eid is None and isinstance(enriched.get("event"), dict):
+            raw_eid = (enriched.get("event") or {}).get("id")
         try:
-            key = int(sofascore_id)
+            event_id: Optional[int] = int(raw_eid) if raw_eid is not None else None
         except Exception:
-            return None
+            event_id = None
+        if event_id is None:
+            # Without a valid event_id we cannot relate lineups to a match;
+            # return an empty list instead of raising an exception.
+            return out
+        source = "sofascore"
+        lu = enriched.get("lineups") or {}
+        # Determine team Sofascore IDs from enriched or fallback to event structure
+        team_ids = {
+            "home": enriched.get("home_team_sofa")
+                     or ((enriched.get("event") or {}).get("homeTeam") or {}).get("id"),
+            "away": enriched.get("away_team_sofa")
+                     or ((enriched.get("event") or {}).get("awayTeam") or {}).get("id"),
+        }
+        for side in ("home", "away"):
+            tid = team_ids.get(side)
+            for p in (lu.get(side) or []):
+                # Each lineup entry may be a dict with 'player' subobject or a flat dict.
+                pl_obj = p.get("player") if isinstance(p, dict) else None
+                player_id = None
+                if pl_obj and pl_obj.get("id") is not None:
+                    player_id = pl_obj.get("id")
+                elif isinstance(p, dict) and p.get("id") is not None:
+                    player_id = p.get("id")
+                # Skip if no player identifier present
+                if not player_id:
+                    continue
+                # Determine jersey number and position fields.  Some feeds use
+                # jerseyNumber, others use shirtNumber or number.  Preserve
+                # whatever numeric representation we can.
+                jersey = None
+                for key in ("jerseyNumber", "shirtNumber", "number"):
+                    if isinstance(p.get(key), (int, str)):
+                        jersey = p.get(key)
+                        break
+                pos = p.get("position") or (pl_obj.get("position") if pl_obj else None)
+                out.append({
+                    "source": source,
+                    "source_event_id": event_id,
+                    "team_sofascore_id": tid,
+                    "player_sofascore_id": player_id,
+                    "jersey_number": jersey,
+                    "position": pos,
+                    "is_starting": bool(p.get("isStarting") or p.get("starting")),
+                    "is_captain": bool(p.get("isCaptain") or p.get("captain")),
+                })
+        return out
 
-        if key in self.team_cache:
-            return self.team_cache[key]
-
+    def parse_formations(self, enriched: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Parse team formations for a single event.  When the `event_id` is
+        missing on the enriched object, attempt to derive it from the
+        embedded event or top‑level ID.  If no ID can be determined,
+        return an empty list.
+        """
+        # Derive the event ID similarly to parse_lineups
+        raw_eid = enriched.get("event_id") or enriched.get("id")
+        if raw_eid is None and isinstance(enriched.get("event"), dict):
+            raw_eid = (enriched.get("event") or {}).get("id")
         try:
-            res = db.client.table("teams").select("id").eq("sofascore_id", key).limit(1).execute()
-            if res.data:
-                team_uuid = res.data[0]["id"]
-                self.team_cache[key] = team_uuid
-                return team_uuid
-        except Exception as e:
-            logger.warning(f"Team lookup failed for {sofascore_id}: {e}")
-        return None
+            event_id: Optional[int] = int(raw_eid) if raw_eid is not None else None
+        except Exception:
+            event_id = None
+        if event_id is None:
+            return []
+        source = "sofascore"
+        out: List[Dict[str, Any]] = []
+        # Attempt to find home and away team IDs via enriched or embedded event
+        home_tid = enriched.get("home_team_sofa")
+        away_tid = enriched.get("away_team_sofa")
+        if home_tid is None and isinstance(enriched.get("event"), dict):
+            home_tid = ((enriched.get("event") or {}).get("homeTeam") or {}).get("id")
+        if away_tid is None and isinstance(enriched.get("event"), dict):
+            away_tid = ((enriched.get("event") or {}).get("awayTeam") or {}).get("id")
+        if enriched.get("homeFormation") and home_tid:
+            out.append({
+                "source": source,
+                "source_event_id": event_id,
+                "team_sofascore_id": int(home_tid),
+                "formation": enriched.get("homeFormation"),
+            })
+        if enriched.get("awayFormation") and away_tid:
+            out.append({
+                "source": source,
+                "source_event_id": event_id,
+                "team_sofascore_id": int(away_tid),
+                "formation": enriched.get("awayFormation"),
+            })
+        return out
 
-    def store_teams(self, teams: List[Dict[str, Any]]) -> tuple[int, int]:
-        """Upsert timova po sofascore_id (unique index postoji u bazi)."""
-        if not teams:
-            return (0, 0)
-        try:
-            db.client.table("teams").upsert(teams, on_conflict="sofascore_id").execute()
-            return (len(teams), 0)
-        except Exception as e:
-            logger.error(f"Failed to store teams: {e}")
-            return (0, len(teams))
-
-
-# Global instance
 team_processor = TeamProcessor()
-
-# ---- Thin wrappers (da import u ostalim modulima radi bez refaktora) ----
-def build_team_records(teams_raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return team_processor.process_teams(teams_raw)
-
-def get_team_uuid(sofascore_id: int) -> Optional[str]:
-    return team_processor.get_team_uuid(sofascore_id)
-
-def store_teams(teams: List[Dict[str, Any]]) -> tuple[int, int]:
-    return team_processor.store_teams(teams)

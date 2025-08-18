@@ -120,6 +120,33 @@ class BrowserManager:
                 self._refresh_session()
             self.last_activity = datetime.now()
 
+    def _build_api_url(self, endpoint: str) -> str:
+        # Ako je već pun URL, koristi ga
+        if endpoint.startswith("http://") or endpoint.startswith("https://"):
+            return endpoint
+
+        ep = endpoint.lstrip("/")
+
+        # End-pointi koji NEMAJU /sport/football prefiks
+        no_sport_prefixes = (
+            "event/",            # npr. event/14357790/lineups, incidents, statistics, managers, h2h, graph...
+            "team/",             # team/3002, team/3002/performance
+            "player/",           # player/921803/characteristics
+            "manager/",          # manager/795757
+            "unique-tournament", # unique-tournament/170/season/76980/top-teams/overall
+            "tournament/",       # ako ikad koristiš /tournament/...
+            "category/", "search", "season/", "coach/"  # sigurnosna mreža
+        )
+
+        base = "https://www.sofascore.com/api/v1"
+
+        if any(ep.startswith(p) for p in no_sport_prefixes):
+            return f"{base}/{ep}"
+        else:
+            # npr. events/live, scheduled-events/2025-08-15
+            return f"{base}/sport/football/{ep}"
+
+
     def _with_session(self, fn, *, retries: int = 1, on_retry_wait: float = 1.0):
         """
         Izvrši fn() uz auto-refresh sesije na InvalidSessionId/WebDriverException.
@@ -145,7 +172,7 @@ class BrowserManager:
             while not self._stop_watchdog.is_set():
                 try:
                     if self._should_refresh_session():
-                        logger.info("🕒 Watchdog: session too old → refreshing")
+                        logger.info("🕑 Watchdog: session too old → refreshing")
                         self._refresh_session()
                     else:
                         # lagani ping – bez stroge greške ako ne uspije
@@ -181,7 +208,7 @@ class BrowserManager:
                 self._with_session(_nav, retries=1)
 
                 # 2) pokupi JSON
-                api_url = f"https://www.sofascore.com/api/v1/sport/football/{endpoint}"
+                api_url = self._build_api_url(endpoint)
                 script = f"""
                     return fetch("{api_url}", {{
                         headers: {{
@@ -189,11 +216,20 @@ class BrowserManager:
                             "Referer": "https://www.sofascore.com/",
                             "User-Agent": navigator.userAgent
                         }}
-                    }}).then(r => {{
-                        if (!r.ok) throw new Error('HTTP ' + r.status);
-                        return r.json();
+                    }}).then(async r => {{
+                        if (!r.ok) {{
+                            // NE bacaj grešku - vrati status da Python može pristojno reagirati
+                            return {{ __error__: r.status }};
+                        }}
+                        try {{
+                            const data = await r.json();
+                            return data;
+                        }} catch (e) {{
+                            return {{ __error__: 499, __msg__: "invalid json" }};
+                        }}
                     }});
                 """
+
 
                 def _exec():
                     return self.driver.execute_script(script)
@@ -201,11 +237,20 @@ class BrowserManager:
                 result = self._with_session(_exec, retries=1)
 
                 if isinstance(result, dict):
+                    # ako API vrati non-OK status (npr. 404), dobit ćemo {"__error__": 404}
+                    if result.get("__error__"):
+                        status = result["__error__"]
+                        logger.warning(f"Fetch {endpoint} returned non-OK status: {status}")
+                        self.last_activity = datetime.now()
+                        return result  # vrati da viši sloj može pristojno preskočiti
+
+                    # ✅ normalan uspješan JSON odgovor
                     logger.info(f"✅ Successfully fetched {endpoint}")
                     self.last_activity = datetime.now()
                     return result
 
                 raise Exception(f"Invalid response format: {type(result)}")
+
 
             except Exception as e:
                 logger.error(f"❌ Attempt {attempt + 1} failed for {endpoint}: {e}")
@@ -216,6 +261,12 @@ class BrowserManager:
                     continue
                 logger.error(f"All attempts failed for {endpoint}")
                 raise Exception(f"Failed to fetch {endpoint} after {max_retries} attempts")
+
+    def fetch_json(self, endpoint: str, max_retries: int = 3) -> dict:
+        """
+        🔧 ALIAS za fetch_data - za kompatibilnost s postojećim kodom
+        """
+        return self.fetch_data(endpoint, max_retries)
 
     def health_check(self) -> bool:
         """Lagani JS ping; vraća False ako je sporo ili invalid session."""
@@ -266,3 +317,17 @@ class BrowserManager:
             self.driver = None
             self.session_start_time = None
             self.last_activity = None
+    
+    def cleanup_resources(self):
+        """Clean up browser resources (alias for close)"""
+        logger.info("Cleaning up browser resources...")
+        pass
+
+# Ako modul izlaže samo BrowserManager, napravi alias:
+try:
+    Browser  # noqa: F401
+except NameError:
+    try:
+        Browser = BrowserManager  # noqa: F401
+    except NameError:
+        pass

@@ -1,96 +1,81 @@
-# scraper/processors/events_processor.py - NEW: Events Processing
-import uuid
-from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
-from core.database import db
-from utils.logger import get_logger
-
-logger = get_logger(__name__)
+# scraper/processors/events_processor.py
+from __future__ import annotations
+from typing import Any, Dict, List, Optional
 
 class EventsProcessor:
-    """Processes match events for database storage"""
-    
-    def process_events(self, events_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Process events data for database insertion"""
-        if not events_data:
-            return []
-        
-        logger.info(f"Processing {len(events_data)} match events...")
-        
-        processed_events = []
-        for event_data in events_data:
-            try:
-                processed_event = self._process_single_event(event_data)
-                if processed_event:
-                    processed_events.append(processed_event)
-            except Exception as e:
-                logger.warning(f"Failed to process event: {e}")
-        
-        logger.info(f"✅ Processed {len(processed_events)} events for database")
-        return processed_events
-    
-    def _process_single_event(self, event_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Process single event for database"""
-        # Generate deterministic UUID from match_id + incident_id + minute
-        match_id = event_data.get('match_id')
-        incident_id = event_data.get('incident_id', '')
-        minute = event_data.get('minute', 0)
-        
-        event_signature = f"{match_id}_{incident_id}_{minute}_{event_data.get('event_type', '')}"
-        event_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"event_{event_signature}"))
-        
-        db_event = {
-            'id': event_uuid,
-            'match_id': match_id,
-            'minute': event_data.get('minute'),
-            'event_type': event_data.get('event_type'),
-            'player_name': event_data.get('player_name'),
-            'team': event_data.get('team'),
-            'description': event_data.get('description'),
-            'incident_id': event_data.get('incident_id'),
-            'added_time': event_data.get('added_time'),
-            'reason': event_data.get('reason'),
-            'assist_player': event_data.get('assist_player'),
-            'created_at': datetime.now(timezone.utc).isoformat()
-        }
-        
-        # Remove None values
-        return {k: v for k, v in db_event.items() if v is not None}
-    
-    def store_events(self, events: List[Dict[str, Any]]) -> tuple[int, int]:
-        """Store events in database with upsert"""
-        if not events:
-            return 0, 0
-        
-        try:
-            logger.info(f"Storing {len(events)} match events...")
-            
-            # Batch upsert events
-            result = db.client.table("match_events").upsert(
-                events,
-                on_conflict="id",
-                count="exact"
-            ).execute()
-            
-            success_count = len(events)
-            logger.info(f"✅ Stored {success_count} events successfully")
-            
-            return success_count, 0
-            
-        except Exception as e:
-            logger.error(f"Failed to store events: {e}")
-            return 0, len(events)
-    
-    def clean_old_events(self, match_id: str) -> int:
-        """Remove old events for a match (for live updates)"""
-        try:
-            result = db.client.table("match_events").delete().eq("match_id", match_id).execute()
-            deleted_count = len(result.data) if result.data else 0
-            logger.info(f"Cleaned {deleted_count} old events for match {match_id}")
-            return deleted_count
-        except Exception as e:
-            logger.warning(f"Failed to clean old events for match {match_id}: {e}")
-            return 0
+    """Convert incidents or enriched 'events' into rows for the match_events table.
 
-# Global events processor instance
+    SofaScore exposes a variety of event types (e.g. 'penalty_goal',
+    'substitution_in') that are not directly accepted by our database.  This
+    processor normalises those values down to a small, allowed set.
+    """
+
+    # Mapping from raw event types to the DB‑accepted categories.  Any type
+    # not found in this map will be stored under the generic category 'event'.
+    _EVENT_TYPE_MAP = {
+        "goal": "goal",
+        "own_goal": "own_goal",
+        "penalty": "penalty",
+        "penalty_goal": "penalty",
+        "penalty_miss": "penalty",
+        "yellow_card": "yellow_card",
+        "yellow": "yellow_card",
+        "booking": "yellow_card",
+        "booked": "yellow_card",
+        "red_card": "red_card",
+        "red": "red_card",
+        "straight_red": "red_card",
+        "second_yellow": "red_card",
+        "substitution": "substitution",
+        "substitution_in": "substitution",
+        "substitution_out": "substitution",
+        "sub": "substitution",
+        "var": "var",
+        "corner": "corner",
+        "corner_kick": "corner",
+        "offside": "offside",
+        # Other temporal or generic events default to 'event'
+        "kickoff": "event",
+        "half_time": "event",
+        "full_time": "event",
+        "period_start": "event",
+        "period_end": "event",
+    }
+
+    def parse(self, enriched: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Convert parsed incidents on an enriched event into rows for the
+        `match_events` table.  If the enriched object does not include
+        `event_id`, attempt to derive it from the top‑level ID or the
+        embedded `event` object.  Without a valid identifier, events are
+        skipped to avoid orphaned rows.
+        """
+        rows: List[Dict[str, Any]] = []
+        # Determine event ID from multiple possible locations
+        raw_eid = enriched.get("event_id") or enriched.get("id")
+        if raw_eid is None and isinstance(enriched.get("event"), dict):
+            raw_eid = (enriched.get("event") or {}).get("id")
+        try:
+            ev_id: Optional[int] = int(raw_eid) if raw_eid is not None else None
+        except Exception:
+            ev_id = None
+        if ev_id is None:
+            return rows
+        for inc in enriched.get("events") or []:
+            # Determine the canonical event_type.  Lower‑case, strip spaces and
+            # underscores, then look up in the mapping.  Unknowns default to 'event'.
+            raw_type = inc.get("type") or ""
+            key = str(raw_type).strip().lower().replace(" ", "_").replace("__", "_")
+            etype = self._EVENT_TYPE_MAP.get(key, "event")
+            rows.append({
+                "source": "sofascore",
+                "source_event_id": ev_id,
+                "minute": inc.get("minute"),
+                "event_type": etype,
+                "team": inc.get("team"),
+                "player_name": inc.get("player_name"),
+                "description": inc.get("description"),
+            })
+        return rows
+
 events_processor = EventsProcessor()

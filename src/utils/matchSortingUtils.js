@@ -57,7 +57,7 @@ const LEAGUE_PRIORITIES = {
   "Russian Premier League": 28,
 
   // Balkanske lige (20-30)
-  HNL: 30, // Hrvatska - povećano
+  HNL: 60, // Hrvatska - povećano
   "Prva Liga Srbije": 26,
   SuperLiga: 26,
   "Prva Liga BiH": 24,
