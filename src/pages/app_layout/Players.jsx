@@ -1,12 +1,23 @@
-// src/pages/app_layout/Players.jsx
+// src/pages/app_layout/Players.jsx - AŽURIRANO S NOVIM BUTTON KOMPONENTAMA
 import { useState, useEffect } from "react";
 import { Icon } from "@iconify-icon/react";
 
+// Import novih button komponenti
+import Button from "../../ui/Button";
+import { PillButton } from "../../ui/SpecializedButtons";
+import AnimatedBackground from "../../ui/AnimatedBackground";
+
 export default function Players() {
+  const [isLoaded, setIsLoaded] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState("all");
   const [selectedLeague, setSelectedLeague] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("rating");
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsLoaded(true), 100);
+    return () => clearTimeout(timer);
+  }, []);
 
   const positions = [
     { id: "all", name: "All Positions", icon: "⚽" },
@@ -100,156 +111,215 @@ export default function Players() {
   });
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
-      <section className="text-center mt-6 mb-8">
-        <h1 className="text-4xl font-black text-primary text-outline">
-          Players
-        </h1>
-        <p className="text-muted-foreground mt-2">
-          Football player statistics and analysis
-        </p>
-      </section>
+    <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-red-950 text-white overflow-hidden relative">
+      {/* Shared AnimatedBackground */}
+      <AnimatedBackground />
 
-      {/* Controls */}
-      <div className="max-w-6xl mx-auto px-4 mb-8 space-y-4">
-        {/* Position & League filters */}
-        <div className="flex flex-col lg:flex-row gap-4">
-          {/* Positions */}
-          <div className="flex gap-2 flex-wrap">
-            {positions.map((position) => (
-              <button
-                key={position.id}
-                onClick={() => setSelectedPosition(position.id)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                  selectedPosition === position.id
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground hover:bg-primary/10"
-                }`}
-              >
-                <span className="mr-1">{position.icon}</span>
-                {position.name}
-              </button>
-            ))}
+      <div className="relative z-10">
+        {/* Header s animacijom */}
+        <section
+          className={`text-center pt-12 pb-8 px-4 transition-all duration-1000 ${
+            isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
+          }`}
+        >
+          <h1 className="font-black text-6xl md:text-7xl mb-4 text-red-500 animate-pulse-slow">
+            Players
+          </h1>
+          <p className="text-xl md:text-2xl text-gray-300 font-light tracking-wider">
+            Football player statistics and analysis
+          </p>
+        </section>
+
+        {/* Controls s novim button komponentama */}
+        <div
+          className={`max-w-6xl mx-auto px-4 mb-8 space-y-6 transition-all duration-700 delay-300 ${
+            isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
+          }`}
+        >
+          {/* Position filters - koristi PillButton */}
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold text-white">Position</h3>
+            <div className="flex gap-2 flex-wrap">
+              {positions.map((position) => (
+                <PillButton
+                  key={position.id}
+                  active={selectedPosition === position.id}
+                  onClick={() => setSelectedPosition(position.id)}
+                  size="sm"
+                >
+                  <span className="mr-1">{position.icon}</span>
+                  {position.name}
+                </PillButton>
+              ))}
+            </div>
           </div>
 
-          {/* Leagues */}
-          <div className="flex gap-2 flex-wrap">
-            {leagues.map((league) => (
-              <button
-                key={league.id}
-                onClick={() => setSelectedLeague(league.id)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                  selectedLeague === league.id
-                    ? "bg-purple-600 text-white"
-                    : "bg-muted text-muted-foreground hover:bg-purple-100"
-                }`}
-              >
-                {league.name}
-              </button>
-            ))}
+          {/* League filters - koristi PillButton */}
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold text-white">League</h3>
+            <div className="flex gap-2 flex-wrap">
+              {leagues.map((league) => (
+                <PillButton
+                  key={league.id}
+                  active={selectedLeague === league.id}
+                  onClick={() => setSelectedLeague(league.id)}
+                  size="sm"
+                  className={
+                    selectedLeague === league.id ? "bg-purple-600" : ""
+                  }
+                >
+                  {league.name}
+                </PillButton>
+              ))}
+            </div>
+          </div>
+
+          {/* Search & Sort */}
+          <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+            <div className="relative">
+              <Icon
+                icon="mdi:magnify"
+                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                width={20}
+              />
+              <input
+                type="text"
+                placeholder="Search players or teams..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 pr-4 py-3 rounded-lg bg-white/10 backdrop-blur-sm text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500/50 border border-white/20"
+              />
+            </div>
+
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="px-4 py-3 rounded-lg bg-white/10 backdrop-blur-sm text-white focus:outline-none focus:ring-2 focus:ring-red-500/50 border border-white/20"
+            >
+              <option value="rating" className="bg-gray-900">
+                Sort by Rating
+              </option>
+              <option value="goals" className="bg-gray-900">
+                Sort by Goals
+              </option>
+              <option value="assists" className="bg-gray-900">
+                Sort by Assists
+              </option>
+              <option value="name" className="bg-gray-900">
+                Sort by Name
+              </option>
+            </select>
           </div>
         </div>
 
-        {/* Search & Sort */}
-        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-          <div className="relative">
-            <Icon
-              icon="mdi:magnify"
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground"
-              width={20}
-            />
-            <input
-              type="text"
-              placeholder="Search players or teams..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 pr-4 py-2 rounded-lg bg-muted text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-          </div>
-
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            className="px-4 py-2 rounded-lg bg-muted text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-          >
-            <option value="rating">Sort by Rating</option>
-            <option value="goals">Sort by Goals</option>
-            <option value="assists">Sort by Assists</option>
-            <option value="name">Sort by Name</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Players Grid */}
-      <div className="max-w-6xl mx-auto px-4">
-        {sortedPlayers.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-6xl mb-4">⚽</div>
-            <p className="text-xl font-bold mb-2">No players found</p>
-            <p className="text-muted-foreground">Try adjusting your filters</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {sortedPlayers.map((player) => (
-              <div
-                key={player.id}
-                className="bg-card border border-border rounded-lg p-4 hover:shadow-lg transition-all cursor-pointer hover:scale-105"
+        {/* Players Grid */}
+        <div
+          className={`max-w-6xl mx-auto px-4 transition-all duration-700 delay-500 ${
+            isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
+          }`}
+        >
+          {sortedPlayers.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="text-6xl mb-4">⚽</div>
+              <p className="text-xl font-bold mb-2">No players found</p>
+              <p className="text-gray-400 mb-6">Try adjusting your filters</p>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSelectedPosition("all");
+                  setSelectedLeague("all");
+                  setSearchQuery("");
+                }}
+                leftIcon="mdi:filter-off"
               >
-                <div className="text-center">
-                  <div className="text-3xl mb-2">{player.flag}</div>
-                  <h3 className="text-lg font-bold mb-1">{player.name}</h3>
-                  <p className="text-sm text-muted-foreground mb-2">
-                    {player.team}
-                  </p>
+                Clear Filters
+              </Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {sortedPlayers.map((player, index) => (
+                <div
+                  key={player.id}
+                  className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-6 hover:shadow-xl transition-all duration-300 cursor-pointer hover:scale-105 hover:border-red-500/30 group"
+                  style={{
+                    animationDelay: `${index * 100}ms`,
+                    animation: isLoaded
+                      ? "fadeInUp 0.6s ease-out forwards"
+                      : "none",
+                  }}
+                >
+                  <div className="text-center">
+                    <div className="text-3xl mb-3">{player.flag}</div>
+                    <h3 className="text-lg font-bold mb-1 text-white group-hover:text-red-400 transition-colors">
+                      {player.name}
+                    </h3>
+                    <p className="text-sm text-gray-400 mb-4">{player.team}</p>
 
-                  <div className="bg-muted rounded-lg p-3 mb-4">
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div>
-                        <div className="text-lg font-bold text-primary">
-                          {player.rating}
+                    <div className="bg-white/5 rounded-lg p-4 mb-4 border border-white/10">
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div>
+                          <div className="text-lg font-bold text-red-400">
+                            {player.rating}
+                          </div>
+                          <div className="text-xs text-gray-400">Rating</div>
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          Rating
+                        <div>
+                          <div className="text-lg font-bold text-green-400">
+                            {player.goals}
+                          </div>
+                          <div className="text-xs text-gray-400">Goals</div>
                         </div>
-                      </div>
-                      <div>
-                        <div className="text-lg font-bold text-green-600">
-                          {player.goals}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          Goals
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-lg font-bold text-blue-600">
-                          {player.assists}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          Assists
+                        <div>
+                          <div className="text-lg font-bold text-blue-400">
+                            {player.assists}
+                          </div>
+                          <div className="text-xs text-gray-400">Assists</div>
                         </div>
                       </div>
                     </div>
+
+                    {/* Ažurirani View Profile button */}
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      fullWidth
+                      leftIcon="mdi:account"
+                    >
+                      View Profile
+                    </Button>
                   </div>
-
-                  <button className="w-full bg-primary text-primary-foreground py-2 rounded-lg hover:bg-primary/90 transition-colors text-sm">
-                    View Profile
-                  </button>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-      {/* Coming Soon Banner */}
-      <div className="max-w-6xl mx-auto px-4 mt-12">
-        <div className="bg-muted rounded-lg p-8 text-center">
-          <h3 className="text-2xl font-bold mb-2">🚀 Coming Soon</h3>
-          <p className="text-muted-foreground">
-            Detailed player statistics, performance charts, comparison tools,
-            and advanced analytics!
-          </p>
+        {/* Coming Soon Banner - ažurirano */}
+        <div
+          className={`max-w-6xl mx-auto px-4 mt-12 transition-all duration-700 delay-700 ${
+            isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
+          }`}
+        >
+          <div className="relative bg-gradient-to-r from-red-900/50 to-gray-900/50 rounded-2xl p-8 text-center border border-red-500/30 backdrop-blur-sm hover:border-red-500/50 transition-colors">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-red-500/20 to-white/10 rounded-2xl blur-sm opacity-50" />
+            <div className="relative">
+              <h3 className="text-3xl font-bold mb-4 bg-gradient-to-r from-red-400 to-white bg-clip-text text-transparent">
+                🚀 Coming Soon
+              </h3>
+              <p className="text-gray-300 text-lg max-w-3xl mx-auto mb-6">
+                Detailed player statistics, performance charts, comparison
+                tools, and advanced analytics!
+              </p>
+              <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                <Button variant="outline" leftIcon="mdi:bell-outline">
+                  Notify Me
+                </Button>
+                <Button variant="ghost" leftIcon="mdi:lightbulb-outline">
+                  Suggest Feature
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

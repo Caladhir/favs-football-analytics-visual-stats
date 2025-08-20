@@ -1,4 +1,4 @@
-// Unified All Matches tab (single view) with strong dedupe and smart/time sorting
+// src/features/tabs/AllMatches.jsx - AŽURIRANO S NOVIM BUTTON KOMPONENTAMA
 import React, { useState, useMemo } from "react";
 import { useAutoRefresh } from "../../hooks/useAutoRefresh";
 import { useAllMatches } from "../../hooks/useAllMatches";
@@ -15,14 +15,18 @@ import {
   normalizeStatus,
 } from "../../utils/matchStatusUtils";
 
-// UI
+// UI Components
 import AllMatchesHeader from "../../features/all_matches/AllMatchesHeader";
 import MatchesGrid from "../../ui/MatchesGrid";
 import AllMatchesDebug from "../../features/all_matches/AllMatchesDebug";
 import EmptyAllMatches from "../../features/all_matches/EmptyAllMatches";
 import LoadingState from "../../ui/LoadingState";
 import ErrorState from "../../ui/ErrorState";
+
+// Import novih button komponenti
 import TimeSortButton, { applyTimeSort } from "../../ui/TimeSortButton";
+import GroupButton from "../../ui/GroupButton";
+import { RefreshButton, PillButton } from "../../ui/SpecializedButtons";
 
 /* ---------------------------------------------
    DEDUPE: spajaj duplikate (live + scheduled)
@@ -216,7 +220,7 @@ export default function AllMatches() {
     return (
       <div className="min-h-screen bg-muted rounded-3xl p-1">
         <div className="flex justify-center my-4">
-          <div className="bg-primary text-white px-4 py-2 rounded-full text-sm font-medium">
+          <div className="bg-red-600 text-white px-4 py-2 rounded-full text-sm font-medium">
             📅 All Matches
           </div>
         </div>
@@ -244,58 +248,61 @@ export default function AllMatches() {
         setSelectedDate={setSelectedDate}
       />
 
-      {/* Controls row */}
+      {/* Controls row - AŽURIRANO S NOVIM BUTTON KOMPONENTAMA */}
       <div className="text-center mb-4 space-y-3">
         {stats && (
           <div className="flex justify-center items-center gap-3 flex-wrap text-xs">
+            {/* Status Pills - koristi PillButton */}
             {stats.live > 0 && (
-              <span className="bg-red-600 text-white px-2 py-1 rounded-full animate-pulse">
+              <PillButton active className="bg-red-600">
                 🔴 {stats.live} Live
-              </span>
+              </PillButton>
             )}
             {stats.upcoming > 0 && (
-              <span className="bg-blue-600 text-white px-2 py-1 rounded-full">
+              <PillButton active className="bg-blue-600">
                 ⏰ {stats.upcoming} Upcoming
-              </span>
+              </PillButton>
             )}
             {stats.finished > 0 && (
-              <span className="bg-green-600 text-white px-2 py-1 rounded-full">
+              <PillButton active className="bg-green-600">
                 ✅ {stats.finished} Finished
-              </span>
+              </PillButton>
             )}
             {stats.topLeagues > 0 && (
-              <span className="bg-yellow-600 text-white px-2 py-1 rounded-full">
+              <PillButton active className="bg-yellow-600">
                 ⭐ {stats.topLeagues} Top
-              </span>
+              </PillButton>
             )}
             {stats.favorites > 0 && (
-              <span className="bg-purple-600 text-white px-2 py-1 rounded-full">
+              <PillButton active className="bg-purple-600">
                 ❤️ {stats.favorites} Favorites
-              </span>
+              </PillButton>
             )}
-
-            {/* Group toggle */}
-            <button
-              onClick={() => setGroupByCompetition((v) => !v)}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 ${
-                groupByCompetition
-                  ? "bg-green-600 text-white"
-                  : "bg-gray-600 text-white"
-              } hover:scale-105 active:scale-95`}
-            >
-              {groupByCompetition ? "📋 Grouped" : "📝 Group"}
-            </button>
-
-            {/* Time sort */}
-            <TimeSortButton
-              value={timeSortType}
-              onChange={setTimeSortType}
-              size="sm"
-              variant="minimal"
-            />
           </div>
         )}
 
+        {/* Controls Row */}
+        <div className="flex justify-center items-center gap-4">
+          {/* Group toggle - koristi GroupButton */}
+          <GroupButton
+            isGrouped={groupByCompetition}
+            onToggle={() => setGroupByCompetition((v) => !v)}
+            size="sm"
+            variant="minimal"
+            groupedText="📋 Grouped"
+            ungroupedText="📝 Group"
+          />
+
+          {/* Time sort - već koristi TimeSortButton */}
+          <TimeSortButton
+            value={timeSortType}
+            onChange={setTimeSortType}
+            size="sm"
+            variant="minimal"
+          />
+        </div>
+
+        {/* Sort indicator */}
         {timeSortType !== "smart" && (
           <div className="text-xs text-muted-foreground">
             Sorted by:{" "}
@@ -313,21 +320,15 @@ export default function AllMatches() {
         showLiveIndicator={true}
       />
 
+      {/* Refresh controls - AŽURIRANO */}
       <div className="flex justify-center items-center gap-3 mt-8 mb-4">
-        <button
+        <RefreshButton
+          isLoading={backgroundRefreshing}
           onClick={handleAutoRefresh}
-          disabled={backgroundRefreshing}
-          className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 flex items-center gap-2 ${
-            backgroundRefreshing
-              ? "bg-gray-600 text-gray-300 cursor-not-allowed"
-              : "bg-primary text-white hover:bg-primary/80 hover:scale-105 active:scale-95"
-          }`}
+          size="lg"
         >
-          <span className={`${backgroundRefreshing ? "animate-spin" : ""}`}>
-            🔄
-          </span>
           {backgroundRefreshing ? "Refreshing..." : "Manual Refresh"}
-        </button>
+        </RefreshButton>
 
         {/* Quick time-sort cycle (mobile) */}
         <button
@@ -340,7 +341,7 @@ export default function AllMatches() {
                 : "smart";
             setTimeSortType(next);
           }}
-          className="md:hidden px-4 py-2 bg-muted text-foreground rounded-lg border border-border hover:bg-muted/80 transition-colors"
+          className="md:hidden px-4 py-2 bg-gray-800/80 text-white rounded-lg border border-gray-600 hover:bg-gray-700/80 transition-colors"
           title="Cycle sort type"
         >
           {timeSortType === "smart"

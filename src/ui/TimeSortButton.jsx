@@ -1,4 +1,4 @@
-// src/ui/TimeSortButton.jsx - REUSABLE TIME SORTING BUTTON
+// src/ui/TimeSortButton.jsx - AŽURIRANO S CRVENOM TEMOM
 import { useState } from "react";
 import { Icon } from "@iconify-icon/react";
 
@@ -63,11 +63,11 @@ export default function TimeSortButton({
 
     switch (variant) {
       case "minimal":
-        return "bg-transparent border border-border hover:bg-muted";
+        return "bg-white/10 backdrop-blur-sm border border-white/20 text-white hover:bg-white/20";
       case "pill":
-        return "bg-muted hover:bg-muted/80 rounded-full border border-border";
+        return "bg-gray-800/80 hover:bg-gray-700/80 rounded-full border border-gray-600 text-white";
       default:
-        return "bg-muted hover:bg-muted/80 border border-border rounded-lg";
+        return "bg-gray-800/80 hover:bg-gray-700/80 border border-gray-600 rounded-lg text-white";
     }
   };
 
@@ -95,7 +95,7 @@ export default function TimeSortButton({
         disabled={disabled}
         className={`
           flex items-center font-medium transition-all duration-200
-          focus:outline-none focus:ring-2 focus:ring-primary/50
+          focus:outline-none focus:ring-2 focus:ring-red-500/50
           hover:scale-[1.02] active:scale-98
           ${getSizeClasses()}
           ${getVariantClasses()}
@@ -132,18 +132,18 @@ export default function TimeSortButton({
 
       {/* Dropdown menu (for right-click or long press) */}
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[200px] overflow-hidden">
+        <div className="absolute top-full left-0 mt-1 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 min-w-[200px] overflow-hidden backdrop-blur-sm">
           {TIME_SORT_OPTIONS.map((option) => (
             <button
               key={option.value}
               onClick={() => handleOptionSelect(option.value)}
               className={`
                 w-full px-3 py-2.5 text-left flex items-center gap-3
-                hover:bg-muted transition-colors
+                hover:bg-gray-800 transition-colors
                 ${
                   value === option.value
-                    ? "bg-primary/10 text-primary border-r-2 border-primary"
-                    : "text-foreground"
+                    ? "bg-red-600/20 text-red-400 border-r-2 border-red-500"
+                    : "text-gray-300"
                 }
               `}
             >
@@ -161,7 +161,7 @@ export default function TimeSortButton({
 
               <div className="flex-1">
                 <div className="font-medium text-sm">{option.label}</div>
-                <div className="text-xs text-muted-foreground mt-0.5">
+                <div className="text-xs text-gray-400 mt-0.5">
                   {option.description}
                 </div>
               </div>
@@ -169,7 +169,7 @@ export default function TimeSortButton({
               {value === option.value && (
                 <Icon
                   icon="mdi:check"
-                  className="text-primary"
+                  className="text-red-400"
                   width={16}
                   height={16}
                 />
@@ -182,7 +182,9 @@ export default function TimeSortButton({
   );
 }
 
-// Specialized variants for different contexts
+// =============================================
+// Specijalizirane verzije - AŽURIRANE S CRVENOM TEMOM
+// =============================================
 
 export function HeaderTimeSortButton({ value, onChange }) {
   return (
@@ -216,7 +218,7 @@ export function FloatingTimeSortButton({ value, onChange }) {
         onChange={onChange}
         size="md"
         variant="pill"
-        className="shadow-xl bg-background/90 backdrop-blur-md"
+        className="shadow-xl bg-gray-900/90 backdrop-blur-md"
       />
     </div>
   );

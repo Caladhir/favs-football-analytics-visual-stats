@@ -24,6 +24,13 @@ logging.basicConfig(
     stream=sys.stdout
 )
 
+# Quiet noisy third-party loggers by default
+for noisy in ("httpx", "urllib3", "selenium", "asyncio", "websockets"):
+    try:
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    except Exception:
+        pass
+
 def get_logger(name: str) -> logging.Logger:
     """Dohvati logger za modul"""
     return logging.getLogger(name)

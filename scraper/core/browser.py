@@ -1,5 +1,6 @@
 # scraper/core/browser.py - STABLE ENHANCED VERSION (auto-refresh session + watchdog)
 import time
+import os
 import threading
 import contextlib
 from datetime import datetime
@@ -51,10 +52,19 @@ class BrowserManager:
                 "--disable-background-timer-throttling",
                 "--disable-renderer-backgrounding",
                 "--disable-backgrounding-occluded-windows",
+                "--log-level=3",   # ⬅️ suppress INFO/WARN from Chromium
+                "--v=0",
             ]
 
             for opt in list(getattr(config, "CHROME_OPTIONS", [])) + stability_options:
                 options.add_argument(opt)
+
+            # Quiet down devtools/automation logs
+            try:
+                options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
+                options.add_experimental_option("useAutomationExtension", False)
+            except Exception:
+                pass
 
             # prefs (blokiramo slike radi brzine)
             prefs = {
@@ -66,10 +76,14 @@ class BrowserManager:
 
             options.page_load_strategy = "eager"
 
-            self.driver = webdriver.Chrome(
-                service=Service(config.CHROMEDRIVER_PATH),
-                options=options,
-            )
+            # Silence chromedriver output (and much of Chrome's child logs)
+            try:
+                devnull = open(os.devnull, "w")
+            except Exception:
+                devnull = None
+            service = Service(config.CHROMEDRIVER_PATH, log_output=devnull) if devnull is not None else Service(config.CHROMEDRIVER_PATH)
+
+            self.driver = webdriver.Chrome(service=service, options=options)
             self.driver.set_page_load_timeout(int(getattr(config, "PAGE_LOAD_TIMEOUT", 30)))
             self.driver.implicitly_wait(int(getattr(config, "IMPLICIT_WAIT", 10)))
 
@@ -323,11 +337,5 @@ class BrowserManager:
         logger.info("Cleaning up browser resources...")
         pass
 
-# Ako modul izlaže samo BrowserManager, napravi alias:
-try:
-    Browser  # noqa: F401
-except NameError:
-    try:
-        Browser = BrowserManager  # noqa: F401
-    except NameError:
-        pass
+# Export a stable alias used across the codebase
+Browser = BrowserManager  # noqa: F401

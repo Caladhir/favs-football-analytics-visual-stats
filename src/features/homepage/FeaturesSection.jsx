@@ -1,6 +1,5 @@
 // src/features/homepage/FeaturesSection.jsx
 // ============================================
-import React from "react";
 import GlowingText from "./GlowingText";
 
 export default function FeaturesSection() {

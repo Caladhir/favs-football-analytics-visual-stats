@@ -1,124 +1,115 @@
-// src/features/dashboard/QuickStats.jsx
-import { useEffect, useState } from "react";
-import supabase from "../../services/supabase";
+// src/features/dashboard/QuickStats.jsx - Enhanced with Original Styling
+import { useQuickStats } from "../../hooks/useQuickStats";
 
-function StatCard({ title, value, sub }) {
+function StatCard({ title, value, sub, delay = 0 }) {
   return (
-    <div className="p-5 bg-card rounded-2xl shadow border border-border/50">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">
-        {title}
+    <div
+      className={`
+        group relative p-6 rounded-2xl border border-white/10 
+        bg-gradient-to-br from-white/5 to-white/10 backdrop-blur-sm
+        hover:scale-105 hover:shadow-2xl hover:shadow-red-500/20 
+        transition-all duration-500 ease-out
+        hover:border-red-500/30 hover:bg-gradient-to-br hover:from-red-500/10 hover:to-white/10
+      `}
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      {/* Hover glow effect */}
+      <div className="absolute -inset-0.5 bg-gradient-to-r from-red-500/20 to-white/10 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur-sm" />
+
+      <div className="relative">
+        <div className="text-xs uppercase tracking-wider text-gray-400 font-semibold mb-3">
+          {title}
+        </div>
+        <div className="text-4xl md:text-5xl font-black text-white mb-2 group-hover:text-red-400 transition-colors duration-300">
+          {value}
+        </div>
+        {sub && (
+          <div className="text-sm text-gray-400 group-hover:text-gray-300 transition-colors duration-300">
+            {sub}
+          </div>
+        )}
       </div>
-      <div className="mt-2 text-3xl font-bold">{value}</div>
-      {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}
+
+      {/* Corner accent */}
+      <div className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full opacity-50 group-hover:opacity-100 transition-opacity duration-300" />
     </div>
   );
 }
 
 export default function QuickStats() {
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
-  const [stats, setStats] = useState({
-    matchesToday: 0,
-    avgGoals7d: 0,
-    activePlayers7d: 0,
-  });
-
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        setErr("");
-        setLoading(true);
-        const now = new Date();
-        const start = new Date(
-          Date.UTC(
-            now.getUTCFullYear(),
-            now.getUTCMonth(),
-            now.getUTCDate(),
-            0,
-            0,
-            0
-          )
-        );
-        const end = new Date(
-          Date.UTC(
-            now.getUTCFullYear(),
-            now.getUTCMonth(),
-            now.getUTCDate(),
-            23,
-            59,
-            59
-          )
-        );
-
-        // 1) Matches today (exact count via head:true)
-        const { count: matchesToday } = await supabase
-          .from("matches")
-          .select("id", { count: "exact", head: true })
-          .gte("start_time", start.toISOString())
-          .lt("start_time", end.toISOString());
-
-        // 2) Avg goals (last 7 days)
-        const sevenAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-        const { data: weekMatches } = await supabase
-          .from("matches")
-          .select("home_score,away_score,start_time")
-          .gte("start_time", sevenAgo.toISOString());
-        const goals = (weekMatches || []).map(
-          (m) => (m.home_score ?? 0) + (m.away_score ?? 0)
-        );
-        const avgGoals7d = goals.length
-          ? (goals.reduce((a, b) => a + b, 0) / goals.length).toFixed(2)
-          : 0;
-
-        // 3) Active players (distinct players with stats in last 7 days)
-        const { data: recentStats } = await supabase
-          .from("player_stats")
-          .select("player_id, created_at")
-          .gte("created_at", sevenAgo.toISOString());
-        const distinct = new Set(
-          (recentStats || []).map((r) => r.player_id).filter(Boolean)
-        );
-
-        setStats({
-          matchesToday: matchesToday || 0,
-          avgGoals7d: Number(avgGoals7d),
-          activePlayers7d: distinct.size,
-        });
-      } catch (e) {
-        setErr(e.message || "Failed to load stats");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchStats();
-  }, []);
+  const { stats, loading, error } = useQuickStats();
 
   if (loading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="p-5 bg-card rounded-2xl animate-pulse h-24" />
-        ))}
+      <div className="p-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          {[...Array(3)].map((_, i) => (
+            <div
+              key={i}
+              className="h-32 rounded-2xl bg-gradient-to-br from-gray-800/50 to-gray-700/50 animate-pulse border border-white/10"
+            />
+          ))}
+        </div>
       </div>
     );
   }
 
-  if (err) {
+  if (error) {
     return (
-      <div className="p-4 bg-destructive/10 text-destructive rounded">
-        {err}
+      <div className="p-8">
+        <div className="text-center p-6 bg-red-900/20 border border-red-500/30 rounded-2xl backdrop-blur-sm">
+          <div className="text-red-400 text-lg font-semibold mb-2">
+            ⚠️ Error Loading Stats
+          </div>
+          <div className="text-red-300 text-sm">{error}</div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <StatCard title="Total Matches (today)" value={stats.matchesToday} />
-      <StatCard title="Avg Goals (7d)" value={stats.avgGoals7d} />
-      <StatCard
-        title="Active Players (7d)"
-        value={`${stats.activePlayers7d}+`}
-      />
+    <div className="p-8">
+      {/* Header */}
+      <div className="text-center mb-8">
+        <h2 className="text-3xl font-bold bg-gradient-to-r from-white via-red-200 to-white bg-clip-text text-transparent mb-2">
+          Ključne Statistike
+        </h2>
+        <p className="text-gray-400 text-sm">
+          Pregled trenutnih performansi i aktivnosti
+        </p>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <StatCard
+          title="Utakmice Danas"
+          value={stats.matchesToday}
+          sub="zakazane za danas"
+          delay={100}
+        />
+        <StatCard
+          title="Prosjek Golova (7d)"
+          value={stats.avgGoals7d}
+          sub="po utakmici"
+          delay={200}
+        />
+        <StatCard
+          title="Aktivni Igrači (7d)"
+          value={`${stats.activePlayers7d}+`}
+          sub="različitih igrača"
+          delay={300}
+        />
+      </div>
+
+      {/* Footer indicator */}
+      <div className="text-center mt-8">
+        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10">
+          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+          <span className="text-xs text-gray-400">
+            Live data • Auto-refresh
+          </span>
+        </div>
+      </div>
     </div>
   );
 }

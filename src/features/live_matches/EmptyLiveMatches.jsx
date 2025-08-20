@@ -1,3 +1,6 @@
+// src/features/live_matches/EmptyLiveMatches.jsx - AŽURIRANO S REFRESH BUTTON
+import { RefreshButton } from "../../ui/SpecializedButtons";
+
 export default function EmptyLiveMatches({ onRefresh }) {
   return (
     <div className="min-h-screen bg-muted rounded-3xl p-1">
@@ -19,12 +22,12 @@ export default function EmptyLiveMatches({ onRefresh }) {
           Check back later or view all matches for today.
         </p>
 
-        <button
-          onClick={onRefresh}
-          className="mt-6 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          🔄 Refresh
-        </button>
+        {/* Ažurirano s novom RefreshButton komponentom */}
+        <div className="mt-6">
+          <RefreshButton onClick={onRefresh} size="lg">
+            🔄 Refresh
+          </RefreshButton>
+        </div>
       </div>
     </div>
   );

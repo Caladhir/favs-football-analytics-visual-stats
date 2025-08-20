@@ -1,4 +1,4 @@
-// src/features/tabs/LiveMatches.jsx - FIXED VERSION WITH TIME SORT BUTTON
+// src/features/tabs/LiveMatches.jsx - KONAČNO ISPRAVLJEN IMPORT
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useLiveMatches } from "../../hooks/useLiveMatches";
 import {
@@ -15,14 +15,18 @@ import LiveMatchesDebug from "../../features/live_matches/LiveMatchesDebug";
 import EmptyLiveMatches from "../../features/live_matches/EmptyLiveMatches";
 import LoadingState from "../../ui/LoadingState";
 import ErrorState from "../../ui/ErrorState";
-import TimeSortButton, { applyTimeSort } from "../../ui/TimeSortButton";
+
+// ISPRAVLJEN IMPORT - koristi default import za GroupButton
+import { RefreshButton } from "../../ui/SpecializedButtons";
+import GroupButton from "../../ui/GroupButton"; // DEFAULT IMPORT!
+import TimeSortButton, { applyTimeSort } from "../../ui/TimeSortButton"; // DEFAULT + NAMED
 
 export default function LiveMatches() {
   const [, setCurrentTime] = useState(new Date());
   const [groupByCompetition, setGroupByCompetition] = useState(true);
   const [timeSortType, setTimeSortType] = useState("smart");
 
-  // 🚀 NOVO: Prati prethodnji broj za force refresh
+  // Prati prethodnji broj za force refresh
   const prevCountRef = useRef(0);
 
   const userPreferences = useUserPreferences();
@@ -35,10 +39,10 @@ export default function LiveMatches() {
     lastRefreshed,
     isRealtimeActive,
     refreshNow,
-    fetchLiveMatches, // još uvijek postoji, ali koristi refreshNow za ručni klik
+    fetchLiveMatches,
   } = useLiveMatches();
 
-  // 🚀 NOVO: Force refresh ako se broj drastično promijeni
+  // Force refresh ako se broj drastično promijeni
   useEffect(() => {
     const currentCount = matches?.length ?? 0;
     const prevCount = prevCountRef.current;
@@ -55,153 +59,132 @@ export default function LiveMatches() {
     prevCountRef.current = currentCount;
   }, [matches?.length, fetchLiveMatches]);
 
-  // 🔧 FIXED: Proper sorting with time sort integration
+  // Proper sorting with time sort integration
   const sortedMatches = useMemo(() => {
     const input = Array.isArray(matches) ? matches : [];
-    if (input.length === 0) return [];
 
-    const smartSorted = sortMatches(input, {
-      prioritizeUserFavorites: userPreferences.sortingEnabled,
-      favoriteTeams: userPreferences.favoriteTeams,
-      favoriteLeagues: userPreferences.favoriteLeagues,
-      currentTime: new Date(),
-      debugMode: import.meta.env.DEV,
-    });
+    if (timeSortType === "smart") {
+      // Use existing smart sorting
+      return sortMatches(input, userPreferences);
+    } else {
+      // Apply time sorting first, then smart sort within time groups
+      const timeSorted = applyTimeSort(input, timeSortType);
+      return sortMatches(timeSorted, userPreferences);
+    }
+  }, [matches, timeSortType, userPreferences]);
 
-    // Then apply time sorting
-    const finalSorted = applyTimeSort(smartSorted, timeSortType);
-    return finalSorted;
-  }, [matches, userPreferences, timeSortType]);
-
+  // Group matches if needed
   const groupedMatches = useMemo(() => {
-    if (!groupByCompetition) return null;
-    return groupMatchesByCompetition(sortedMatches);
+    return groupByCompetition && sortedMatches.length > 0
+      ? groupMatchesByCompetition(sortedMatches)
+      : null;
   }, [sortedMatches, groupByCompetition]);
 
-  const topLeaguesCount = sortedMatches.filter(
-    (match) => getLeaguePriority(match.competition) > 80
-  ).length;
+  // Stats calculations
+  const topLeaguesCount = useMemo(() => {
+    return sortedMatches.filter(
+      (match) => getLeaguePriority(match.competition) <= 5
+    ).length;
+  }, [sortedMatches]);
 
-  const favoritesCount = sortedMatches.filter(
-    (match) =>
-      userPreferences.favoriteTeams.some(
-        (team) =>
-          team.toLowerCase() === match.home_team?.toLowerCase() ||
-          team.toLowerCase() === match.away_team?.toLowerCase()
-      ) ||
-      userPreferences.favoriteLeagues.some(
-        (league) => league.toLowerCase() === match.competition?.toLowerCase()
-      )
-  ).length;
+  const favoritesCount = useMemo(() => {
+    return sortedMatches.filter(
+      (match) =>
+        userPreferences.favoriteTeams.includes(match.home_team) ||
+        userPreferences.favoriteTeams.includes(match.away_team)
+    ).length;
+  }, [sortedMatches, userPreferences.favoriteTeams]);
 
+  // Update current time every minute for live updates
   useEffect(() => {
-    if ((matches?.length ?? 0) > 0) {
-      const interval = setInterval(() => {
-        setCurrentTime(new Date());
-      }, 1000);
+    const interval = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
-      return () => clearInterval(interval);
-    }
-  }, [matches?.length]);
-
-  if (loading) {
+  // Loading state
+  if (loading && (!matches || matches.length === 0)) {
     return <LoadingState message="Loading live matches..." />;
   }
 
+  // Error state
   if (error) {
-    return <ErrorState error={error} onRetry={() => fetchLiveMatches(false)} />;
+    return (
+      <ErrorState
+        title="Failed to load live matches"
+        message={error}
+        onRetry={() => fetchLiveMatches(false)}
+      />
+    );
   }
 
-  if (!Array.isArray(matches) || matches.length === 0) {
+  // Empty state
+  if (!loading && (!matches || matches.length === 0)) {
     return <EmptyLiveMatches onRefresh={() => fetchLiveMatches(false)} />;
   }
 
   return (
     <div className="min-h-screen bg-muted rounded-3xl p-1">
+      {/* Header */}
       <LiveMatchesHeader
-        matchCount={matches.length}
+        matchCount={sortedMatches.length}
         backgroundRefreshing={backgroundRefreshing}
+        lastRefreshed={lastRefreshed}
+        isRealtimeActive={isRealtimeActive}
       />
 
-      {/* 🔧 ENHANCED: Stats row with Time Sort Button */}
-      <div className="text-center mb-4 space-y-3">
-        <p className="text-muted-foreground text-sm">
-          Live football matches happening right now
-        </p>
+      {/* Stats */}
+      <LiveMatchesStats
+        total={sortedMatches.length}
+        topLeagues={topLeaguesCount}
+        favorites={favoritesCount}
+      />
 
-        {/* Stats and controls row */}
-        <div className="flex justify-center items-center gap-3 flex-wrap text-xs">
-          {topLeaguesCount > 0 && (
-            <span className="bg-blue-600 text-white px-2 py-1 rounded-full">
-              ⭐ {topLeaguesCount} Top League{topLeaguesCount === 1 ? "" : "s"}
-            </span>
-          )}
+      {/* Controls */}
+      <div className="flex justify-center items-center gap-4 mb-6">
+        {/* Group toggle button */}
+        <GroupButton
+          isGrouped={groupByCompetition}
+          onToggle={() => setGroupByCompetition(!groupByCompetition)}
+          size="sm"
+          variant="minimal"
+          groupedText=" Grouped"
+          ungroupedText=" Group"
+        />
 
-          {favoritesCount > 0 && (
-            <span className="bg-green-600 text-white px-2 py-1 rounded-full">
-              ❤️ {favoritesCount} Favorite{favoritesCount === 1 ? "" : "s"}
-            </span>
-          )}
-
-          {/* Group toggle */}
-          <button
-            onClick={() => setGroupByCompetition(!groupByCompetition)}
-            className={`
-              px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-200
-              ${
-                groupByCompetition
-                  ? "bg-green-600 text-white"
-                  : "bg-gray-600 text-white"
-              }
-              hover:scale-105 active:scale-95
-            `}
-          >
-            {groupByCompetition ? "📋 Grouped" : "📝 Group"}
-          </button>
-
-          {/* 🆕 NEW: Time Sort Button */}
-          <TimeSortButton
-            value={timeSortType}
-            onChange={setTimeSortType}
-            size="sm"
-            variant="minimal"
-          />
-        </div>
-
-        {/* Sort type indicator */}
-        {timeSortType !== "smart" && (
-          <div className="text-xs text-muted-foreground">
-            Sorted by:{" "}
-            {timeSortType === "chronological"
-              ? "Earliest first"
-              : "Latest first"}
-          </div>
-        )}
+        {/* Time Sort Button */}
+        <TimeSortButton
+          value={timeSortType}
+          onChange={setTimeSortType}
+          size="sm"
+          variant="minimal"
+        />
       </div>
 
+      {/* Sort type indicator */}
+      {timeSortType !== "smart" && (
+        <div className="text-center text-xs text-gray-400 mb-4">
+          Sorted by:{" "}
+          {timeSortType === "chronological" ? "Earliest first" : "Latest first"}
+        </div>
+      )}
+
+      {/* Matches Grid */}
       <MatchesGrid
         groupByCompetition={groupByCompetition}
         groupedMatches={groupedMatches}
         sortedMatches={sortedMatches}
-        showLiveIndicator={false}
+        showLiveIndicator={true}
       />
 
       {/* Manual refresh and controls */}
       <div className="flex justify-center items-center gap-3 mt-8 mb-4">
-        <button
+        <RefreshButton
+          isLoading={backgroundRefreshing}
           onClick={() => fetchLiveMatches(false)}
-          disabled={backgroundRefreshing}
-          className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 flex items-center gap-2 ${
-            backgroundRefreshing
-              ? "bg-gray-600 text-gray-300 cursor-not-allowed"
-              : "bg-red-600 text-white hover:bg-red-700 hover:scale-105 active:scale-95"
-          }`}
+          size="lg"
         >
-          <span className={`${backgroundRefreshing ? "animate-spin" : ""}`}>
-            🔄
-          </span>
           {backgroundRefreshing ? "Refreshing..." : "Manual Refresh"}
-        </button>
+        </RefreshButton>
 
         {/* Quick sort toggle for mobile */}
         <button
@@ -214,7 +197,7 @@ export default function LiveMatches() {
                 : "smart";
             setTimeSortType(nextSort);
           }}
-          className="md:hidden px-4 py-2 bg-muted text-foreground rounded-lg border border-border hover:bg-muted/80 transition-colors"
+          className="md:hidden px-4 py-2 bg-gray-800/80 text-white rounded-lg border border-gray-600 hover:bg-gray-700/80 transition-colors"
           title="Cycle sort type"
         >
           {timeSortType === "smart"
@@ -225,6 +208,7 @@ export default function LiveMatches() {
         </button>
       </div>
 
+      {/* Debug info */}
       <LiveMatchesDebug
         matches={matches}
         sortedMatches={sortedMatches}

@@ -25,16 +25,6 @@ export default function LiveMatchesStats({
             ❤️ {favoritesCount} Favorite{favoritesCount === 1 ? "" : "s"}
           </span>
         )}
-
-        {/* 🚀 NOVO: Group toggle s reusable komponentom */}
-        <GroupButton
-          isGrouped={groupByCompetition}
-          onToggle={() => setGroupByCompetition(!groupByCompetition)}
-          size="sm"
-          groupedText="Grouped"
-          ungroupedText="Group"
-          variant="minimal"
-        />
       </div>
     </div>
   );

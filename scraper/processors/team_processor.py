@@ -1,6 +1,6 @@
 # scraper/processors/team_processor.py
 from __future__ import annotations
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 class TeamProcessor:
     """Vadi timove i igrače (iz lineups) u jednostavne upsert objekte."""
@@ -17,10 +17,18 @@ class TeamProcessor:
             country = None
             if isinstance(t.get("country"), dict):
                 country = t["country"].get("name")
+            # Ensure non-empty team name; DB has NOT NULL constraint on teams.name
+            name_val = t.get("name") or t.get("shortName")
+            if not (isinstance(name_val, str) and name_val.strip()):
+                try:
+                    name_val = f"Team {int(sid)}"
+                except Exception:
+                    name_val = "Team"
+            short_val = t.get("shortName") or (t.get("name") or "")[:15]
             return {
                 "sofascore_id": int(sid),
-                "name": t.get("name") or t.get("shortName") or "",
-                "short_name": t.get("shortName") or (t.get("name") or "")[:15],
+                "name": name_val,
+                "short_name": short_val,
                 "country": country,
             }
 
@@ -137,19 +145,97 @@ class TeamProcessor:
             home_tid = ((enriched.get("event") or {}).get("homeTeam") or {}).get("id")
         if away_tid is None and isinstance(enriched.get("event"), dict):
             away_tid = ((enriched.get("event") or {}).get("awayTeam") or {}).get("id")
-        if enriched.get("homeFormation") and home_tid:
+        # Fallback: derive from raw lineups by inspecting team or players[].teamId
+        if (home_tid is None or away_tid is None) and isinstance(enriched.get("_raw_lineups"), dict):
+            raw = enriched.get("_raw_lineups") or {}
+            if home_tid is None:
+                h = raw.get("home") or {}
+                home_tid = (h.get("team") or {}).get("id") or None
+                if home_tid is None and isinstance(h.get("players"), list) and h.get("players"):
+                    try:
+                        home_tid = (h.get("players")[0].get("teamId") or h.get("players")[0].get("team", {}).get("id"))
+                    except Exception:
+                        home_tid = None
+            if away_tid is None:
+                a = raw.get("away") or {}
+                away_tid = (a.get("team") or {}).get("id") or None
+                if away_tid is None and isinstance(a.get("players"), list) and a.get("players"):
+                    try:
+                        away_tid = (a.get("players")[0].get("teamId") or a.get("players")[0].get("team", {}).get("id"))
+                    except Exception:
+                        away_tid = None
+        home_form = enriched.get("homeFormation")
+        away_form = enriched.get("awayFormation")
+        # Fallback: inspect raw lineups payload if formations weren't set
+        if (not home_form or not away_form) and isinstance(enriched.get("_raw_lineups"), dict):
+            raw = enriched.get("_raw_lineups") or {}
+            # direct keys
+            home_form = home_form or raw.get("homeFormation")
+            away_form = away_form or raw.get("awayFormation")
+            # nested list variant
+            teams = raw.get("teams") or raw.get("lineups")
+            if isinstance(teams, list):
+                for t in teams:
+                    try:
+                        is_home = t.get("isHome")
+                        form = t.get("formation") or (t.get("team") or {}).get("formation")
+                        if is_home is True and not home_form:
+                            home_form = form
+                        elif is_home is False and not away_form:
+                            away_form = form
+                    except Exception:
+                        continue
+            # deep scan as last resort
+            if (not home_form or not away_form):
+                def _walk(obj):
+                    if isinstance(obj, dict):
+                        yield obj
+                        for v in obj.values():
+                            yield from _walk(v)
+                    elif isinstance(obj, list):
+                        for it in obj:
+                            yield from _walk(it)
+                for node in _walk(raw):
+                    if not isinstance(node, dict):
+                        continue
+                    form = node.get("formation")
+                    if not isinstance(form, str):
+                        continue
+                    # try infer side by isHome or by matching team.id
+                    side = None
+                    if node.get("isHome") is True:
+                        side = "home"
+                    elif node.get("isHome") is False:
+                        side = "away"
+                    else:
+                        t = node.get("team") or {}
+                        tid = t.get("id")
+                        if tid is not None:
+                            try:
+                                tid = int(tid)
+                            except Exception:
+                                pass
+                            if home_tid and tid == int(home_tid):
+                                side = "home"
+                            elif away_tid and tid == int(away_tid):
+                                side = "away"
+                    if side == "home" and not home_form:
+                        home_form = form
+                    elif side == "away" and not away_form:
+                        away_form = form
+        if home_form and home_tid:
             out.append({
                 "source": source,
                 "source_event_id": event_id,
                 "team_sofascore_id": int(home_tid),
-                "formation": enriched.get("homeFormation"),
+                "formation": home_form,
             })
-        if enriched.get("awayFormation") and away_tid:
+        if away_form and away_tid:
             out.append({
                 "source": source,
                 "source_event_id": event_id,
                 "team_sofascore_id": int(away_tid),
-                "formation": enriched.get("awayFormation"),
+                "formation": away_form,
             })
         return out
 

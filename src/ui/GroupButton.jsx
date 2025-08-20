@@ -1,4 +1,4 @@
-// src/ui/GroupButton.jsx - ENHANCED verzija s naprednim stilovima
+// src/ui/GroupButton.jsx - AŽURIRANO S CRVENOM TEMOM I MODERNIZOVANO
 import React from "react";
 
 export default function GroupButton({
@@ -30,17 +30,17 @@ export default function GroupButton({
     switch (variant) {
       case "minimal":
         return isGrouped
-          ? "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-200"
+          ? "bg-red-100 text-red-700 border-red-300 hover:bg-red-200"
           : "bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200";
 
       case "vibrant":
         return isGrouped
-          ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white border-purple-400 shadow-purple-500/25 hover:from-purple-600 hover:to-pink-600"
+          ? "bg-gradient-to-r from-red-500 to-red-600 text-white border-red-400 shadow-red-500/25 hover:from-red-600 hover:to-red-700"
           : "bg-gradient-to-r from-gray-700 to-gray-800 text-white border-gray-600 shadow-gray-500/25 hover:from-gray-800 hover:to-gray-900";
 
       default:
         return isGrouped
-          ? "bg-gradient-to-r from-green-500 to-green-600 text-white border-green-400 shadow-green-500/25 hover:from-green-600 hover:to-green-700"
+          ? "bg-gradient-to-r from-red-500 to-red-600 text-white border-red-400 shadow-red-500/25 hover:from-red-600 hover:to-red-700"
           : "bg-gradient-to-r from-gray-600 to-gray-700 text-white border-gray-500 shadow-gray-500/25 hover:from-gray-700 hover:to-gray-800";
     }
   };
@@ -52,7 +52,7 @@ export default function GroupButton({
       className={`
         relative overflow-hidden font-semibold rounded-full 
         transition-all duration-300 ease-out
-        border-2 focus:outline-none focus:ring-3 focus:ring-blue-400/50
+        border-2 focus:outline-none focus:ring-3 focus:ring-red-400/50
         transform hover:scale-105 active:scale-95 
         shadow-lg hover:shadow-xl
         ${getSizeClasses()}
@@ -100,15 +100,15 @@ export default function GroupButton({
         </span>
       </span>
 
-      {/* Hover glow effect */}
+      {/* Hover glow effect - AŽURIRANO NA CRVENO */}
       <span
         className={`
         absolute inset-0 rounded-full opacity-0 transition-opacity duration-300
         hover:opacity-100 pointer-events-none
         ${
           isGrouped
-            ? "shadow-[0_0_20px_rgba(34,197,94,0.4)]"
-            : "shadow-[0_0_20px_rgba(107,114,128,0.4)]"
+            ? "shadow-[0_0_20px_rgba(239,68,68,0.4)]" // Red-500
+            : "shadow-[0_0_20px_rgba(107,114,128,0.4)]" // Gray-500
         }
       `}
       />
@@ -116,7 +116,9 @@ export default function GroupButton({
   );
 }
 
-// Specijalizirane verzije za različite kontekste
+// =============================================
+// Specijalizirane verzije - AŽURIRANE S CRVENOM TEMOM
+// =============================================
 
 // Za header/navigation
 export function HeaderGroupButton({ isGrouped, onToggle }) {
@@ -133,18 +135,18 @@ export function HeaderGroupButton({ isGrouped, onToggle }) {
   );
 }
 
-// Za sidebar
+// Za sidebar - AŽURIRANO S CRVENOM TEMOM
 export function SidebarGroupButton({ isGrouped, onToggle }) {
   return (
     <button
       onClick={onToggle}
       className={`
         w-full p-3 rounded-lg font-medium transition-all duration-200
-        border-2 focus:outline-none focus:ring-2 focus:ring-blue-500
+        border-2 focus:outline-none focus:ring-2 focus:ring-red-500
         flex items-center gap-3 group
         ${
           isGrouped
-            ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+            ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
             : "bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100"
         }
       `}
@@ -156,7 +158,7 @@ export function SidebarGroupButton({ isGrouped, onToggle }) {
         ${isGrouped ? "rotate-0" : "rotate-180"}
       `}
       >
-        {isGrouped ? "📋" : ""}
+        {isGrouped ? "📋" : "📝"}
       </span>
 
       <span className="flex-1 text-left">
@@ -170,7 +172,7 @@ export function SidebarGroupButton({ isGrouped, onToggle }) {
   );
 }
 
-// Za floating action button
+// Za floating action button - AŽURIRANO S CRVENOM TEMOM
 export function FloatingGroupButton({ isGrouped, onToggle }) {
   return (
     <button
@@ -179,13 +181,13 @@ export function FloatingGroupButton({ isGrouped, onToggle }) {
         fixed bottom-6 right-6 w-14 h-14 rounded-full
         font-medium transition-all duration-300 ease-out
         border-2 flex items-center justify-center
-        focus:outline-none focus:ring-4 focus:ring-blue-400/50
+        focus:outline-none focus:ring-4 focus:ring-red-400/50
         transform hover:scale-110 active:scale-95 
         shadow-xl hover:shadow-2xl z-50
         ${
           isGrouped
-            ? "bg-green-500 text-white border-green-400 shadow-green-500/25"
-            : "bg-blue-500 text-white border-blue-400 shadow-blue-500/25"
+            ? "bg-red-500 text-white border-red-400 shadow-red-500/25"
+            : "bg-gray-600 text-white border-gray-500 shadow-gray-500/25"
         }
       `}
       aria-pressed={isGrouped}

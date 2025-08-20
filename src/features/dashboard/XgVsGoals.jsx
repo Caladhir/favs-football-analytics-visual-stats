@@ -1,111 +1,80 @@
-// src/features/dashboard/XgVsGoals.jsx
-import { useEffect, useState } from "react";
-import supabase from "../../services/supabase";
-
-function Bar({ label, actual, expected }) {
-  const pct = Math.max(
-    0,
-    Math.min(100, Math.round(((actual - expected) / (expected || 1)) * 100))
-  );
-  return (
-    <div className="p-3 bg-muted/40 rounded">
-      <div className="flex items-center justify-between text-sm">
-        <span className="font-medium truncate">{label}</span>
-        <span className="text-xs text-muted-foreground">
-          {pct > 0 ? `+${pct}%` : `${pct}%`}
-        </span>
-      </div>
-      <div className="mt-2 h-2 w-full bg-muted rounded overflow-hidden">
-        <div
-          className="h-2 bg-primary"
-          style={{
-            width: `${Math.min(
-              100,
-              Math.round((actual / (expected || 1)) * 50)
-            )}%`,
-          }}
-        />
-      </div>
-      <div className="mt-1 text-[11px] text-muted-foreground">
-        Actual: {actual.toFixed(2)} • Expected (proxy): {expected.toFixed(2)}
-      </div>
-    </div>
-  );
-}
+// src/features/dashboard/XgVsGoals.jsx - Vertically Centered
+import { useXgVsGoals } from "../../hooks/useXgVsGoals";
 
 export default function XgVsGoals() {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const run = async () => {
-      setLoading(true);
-      const since = new Date(
-        Date.now() - 21 * 24 * 60 * 60 * 1000
-      ).toISOString();
-      const { data: matches } = await supabase
-        .from("matches")
-        .select("home_team,away_team,home_score,away_score,start_time,status")
-        .gte("start_time", since);
-
-      const teamGoals = new Map();
-      const teamGames = new Map();
-      (matches || []).forEach((m) => {
-        const hs = m.home_score ?? 0;
-        const as = m.away_score ?? 0;
-        const push = (name, g) => {
-          teamGoals.set(name, (teamGoals.get(name) || 0) + g);
-          teamGames.set(name, (teamGames.get(name) || 0) + 1);
-        };
-        push(m.home_team, hs);
-        push(m.away_team, as);
-      });
-
-      // Build top 4 by total goals and compute simple xG proxy = team average goals over 21d
-      const topTeams = [...teamGoals.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 4)
-        .map(([name]) => name);
-
-      const rows = topTeams.map((t) => {
-        const totalGoals = teamGoals.get(t) || 0;
-        const games = teamGames.get(t) || 1;
-        const actual = totalGoals / games; // avg goals per game last 21d
-        const expected = (totalGoals / games) * 0.9; // simple baseline proxy (90%)
-        return { team: t, actual, expected };
-      });
-
-      setRows(rows);
-      setLoading(false);
-    };
-    run();
-  }, []);
+  const { teams, loading, error } = useXgVsGoals(21, 4);
 
   return (
-    <div className="p-5 bg-card rounded-2xl shadow border border-border/50">
-      <h3 className="text-sm font-semibold mb-3">xG vs Actual (proxy)</h3>
-      {loading ? (
-        <div className="space-y-2">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-14 bg-muted/40 rounded animate-pulse" />
-          ))}
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="text-sm text-muted-foreground">No data.</div>
-      ) : (
-        <div className="space-y-3">
-          {rows.map((r) => (
-            <Bar
-              key={r.team}
-              label={r.team}
-              actual={r.actual}
-              expected={r.expected}
-            />
-          ))}
-        </div>
-      )}
-      <div className="mt-2 text-[11px] text-muted-foreground">
-        * xG proxy je pojednostavljen dok ne dodamo prave xG podatke.
+    <div className="h-full p-5 bg-card rounded-2xl shadow border border-border/50 flex flex-col">
+      <div className="text-center mb-4">
+        <h3 className="text-sm font-semibold flex items-center justify-center gap-2">
+          📊 xG vs Actual (proxy)
+        </h3>
+      </div>
+
+      <div className="flex-1 flex flex-col justify-center">
+        {loading ? (
+          <div className="space-y-2">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-14 bg-muted/40 rounded animate-pulse" />
+            ))}
+          </div>
+        ) : error ? (
+          <div className="text-center text-sm text-destructive">{error}</div>
+        ) : teams.length === 0 ? (
+          <div className="text-center text-sm text-muted-foreground py-8">
+            No data available.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {teams.map((team, idx) => {
+              const pct = Math.round(
+                ((team.actual - team.expected) / team.expected) * 100
+              );
+              return (
+                <div key={idx} className="p-4 bg-muted/40 rounded-lg">
+                  <div className="flex items-center justify-between text-sm mb-2">
+                    <span className="font-medium">{team.team}</span>
+                    <span
+                      className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                        pct > 0
+                          ? "bg-green-500/20 text-green-400"
+                          : "bg-red-500/20 text-red-400"
+                      }`}
+                    >
+                      {pct > 0 ? `+${pct}%` : `${pct}%`}
+                    </span>
+                  </div>
+                  <div className="h-3 w-full bg-muted rounded-full overflow-hidden mb-2">
+                    <div
+                      className="h-3 bg-gradient-to-r from-primary/50 to-primary transition-all duration-500"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          Math.round((team.actual / team.expected) * 50)
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="text-center text-xs text-muted-foreground">
+                    Actual:{" "}
+                    <span className="font-semibold">
+                      {team.actual.toFixed(2)}
+                    </span>{" "}
+                    • Expected:{" "}
+                    <span className="font-semibold">
+                      {team.expected.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="text-center mt-4 text-xs text-muted-foreground">
+        * xG proxy is simplified until we add real xG data.
       </div>
     </div>
   );
