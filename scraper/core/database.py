@@ -81,8 +81,8 @@ _ALLOWED = {
         "primary_color","secondary_color","founded","venue","venue_capacity",
     },
     "players": {
-        "full_name","position","number","team_id","nationality","age",
-        "height_cm","weight_kg","sofascore_id",
+    "full_name","position","number","team_id","nationality","age",
+    "height_cm","sofascore_id",
     },
     "managers": {
         "full_name","nationality","birth_date","team_id","sofascore_id",
@@ -130,7 +130,7 @@ _ALLOWED = {
 }
 
 _INT_FIELDS: Dict[str, Set[str]] = {
-    "players": {"number","age","height_cm","weight_kg"},
+    "players": {"number","age","height_cm"},
     "lineups": {"jersey_number"},
     "player_stats": {"goals","assists","shots","shots_total","shots_on_target","yellow_cards","red_cards",
                      "passes","tackles","minutes_played"},
@@ -715,7 +715,15 @@ class DatabaseClient:
             k = (r.get("match_id"), r.get("player_id"))
             if not all(k):
                 continue
-            tmp[k] = r
+            # prefer row that has higher minutes or rating if duplicate
+            if k in tmp:
+                a = tmp[k]; b = r
+                score_a = (a.get("minutes_played") or 0, a.get("rating") or 0)
+                score_b = (b.get("minutes_played") or 0, b.get("rating") or 0)
+                if score_b > score_a:
+                    tmp[k] = b
+            else:
+                tmp[k] = r
         payload = list(tmp.values())
         return self._upsert("player_stats", payload, on_conflict="match_id,player_id")
 
@@ -733,65 +741,74 @@ class DatabaseClient:
         return self._upsert("match_stats", payload, on_conflict="match_id,team_id")
 
     def upsert_shots(self, rows: List[Dict[str, Any]]) -> tuple[int, int]:
+        """Upsert rows into shots.
+        Conflict key: (match_id, player_id, minute, second, x, y, outcome)
+        Returns (ok, fail). Adds verbose diagnostics to trace zero-save issues.
         """
-        Upsert u 'shots'. Konflikt ključ prati DB uniq constraint:
-        (match_id, player_id, minute, second, x, y, outcome)
-        """
+        pre = len(rows)
         clean = _clean_rows("shots", rows)
+        logger.info(
+            f"core.database | shots debug incoming={pre} after_clean={len(clean)} sample={clean[:1] if clean else None}"
+        )
         if not clean:
             return (0, 0)
 
-        tmp: Dict[Tuple, Dict[str, Any]] = {}
+        dedup: Dict[Tuple, Dict[str, Any]] = {}
+        dropped_required = 0
         for r in clean:
             k = (
-                r.get("match_id"), r.get("player_id"),
-                r.get("minute"), r.get("second"),
+                r.get("match_id"), r.get("player_id"), r.get("minute"), r.get("second"),
                 r.get("x"), r.get("y"), r.get("outcome"),
             )
-            # second može biti None u DB-u, ali ostala polja ne smiju
+            # allow second to be None but others required
             if None in (k[0], k[1], k[2], k[4], k[5], k[6]):
+                dropped_required += 1
                 continue
-            tmp[k] = r
-
-        payload = list(tmp.values())
-        # ako ti RLS/triggeri rade validaciju prema player_stats, nemoj slati team_id u payloadu
-        # (ovo izbjegava "cross-database references ..." error)
+            dedup[k] = r
+        payload = list(dedup.values())
         for p in payload:
             p.pop("team_id", None)
-
-        # Prvo pokušaj batch upsert; na grešku fallback na pojedinačne insert-e.
+        logger.info(
+            f"core.database | shots payload ready size={len(payload)} dropped_required={dropped_required} distinct_keys={len(dedup)}"
+        )
+        if not payload:
+            return (0, pre)
         try:
-            self.client.table("shots").upsert(
+            resp = self.client.table("shots").upsert(
                 payload,
-                on_conflict="match_id,player_id,minute,second,x,y,outcome",
-                ignore_duplicates=True
+                on_conflict="match_id,player_id,minute,second,x,y,outcome"
             ).execute()
-            # PostgREST may not return inserted rows here; treat success as all accepted.
-            return (len(payload), 0)
+            returned = len(resp.data or [])
+            inserted = returned if returned > 0 else len(payload)
+            logger.info(
+                f"core.database | shots upsert done returned={returned} assumed_inserted={inserted} first_row={payload[0] if payload else None}"
+            )
+            if returned == 0:
+                logger.warning("core.database | shots upsert returned 0 rows (possibly no select privilege on table)")
+            return (inserted, 0 if inserted == len(payload) else max(0, len(payload) - inserted))
         except Exception as e:
-            logger.warning(f"core.database | shots batch upsert failed, fallback to per-row: {e}")
-
-        ok = fail = 0
-        for idx, item in enumerate(payload):
-            try:
-                # pokušaj insert pojedinačno; duplikat tretiraj kao uspjeh
-                self.client.table("shots").insert([item]).execute()
-                ok += 1
-            except Exception as ex:
-                msg = str(ex).lower()
-                if "duplicate" in msg or "unique" in msg or "already exists" in msg:
+            msg_low = str(e).lower()
+            if ("does not exist" in msg_low or "relation" in msg_low) and "shots" in msg_low:
+                logger.error("core.database | shots table missing. Create table before ingesting shots.")
+                return (0, len(payload))
+            logger.warning(f"core.database | shots batch upsert failed, fallback per-row: {e}")
+            ok = fail = 0
+            for idx, item in enumerate(payload):
+                try:
+                    self.client.table("shots").insert([item]).execute()
                     ok += 1
-                else:
-                    fail += 1
-                    # Logiraj samo prvu realnu grešku radi buke
-                    if fail == 1:
-                        logger.warning(f"core.database | shots insert problem: {ex}")
-                    # Ako je problem "cross-database references", prekini dalje i označi preostale kao fail
-                    if "cross-database references" in msg:
-                        remaining = len(payload) - idx - 1
-                        fail += remaining
-                        break
-        return (ok, fail)
+                except Exception as ex:
+                    em = str(ex).lower()
+                    if any(w in em for w in ("duplicate","unique","already exists")):
+                        ok += 1
+                    else:
+                        fail += 1
+                        if fail == 1:
+                            logger.warning(f"core.database | shots insert problem: {ex}")
+                        if "cross-database references" in em:
+                            fail += len(payload) - idx - 1
+                            break
+            return (ok, fail)
 
     def upsert_average_positions(self, rows: List[Dict[str, Any]]) -> tuple[int, int]:
         """
@@ -805,16 +822,26 @@ class DatabaseClient:
         for r in rows:
             if not (r.get("match_id") and r.get("player_id")):
                 continue
+            # Preserve zero coordinates (can't rely on truthiness)
+            raw_x = r.get("x") if r.get("x") is not None else r.get("avg_x")
+            raw_y = r.get("y") if r.get("y") is not None else r.get("avg_y")
+            # Skip rows without both coordinates – would violate NOT NULL
+            if raw_x is None or raw_y is None:
+                continue
             mapped.append({
                 "match_id": r.get("match_id"),
                 "player_id": r.get("player_id"),
                 "team_id": r.get("team_id"),
-                "avg_x": r.get("x") or r.get("avg_x"),
-                "avg_y": r.get("y") or r.get("avg_y"),
+                "avg_x": raw_x,
+                "avg_y": raw_y,
                 "touches": r.get("touches"),
                 "minutes_played": r.get("minutes_played"),
             })
+        pre = len(mapped)
         clean = _clean_rows("average_positions", mapped)
+        touch_present = sum(1 for r in clean if r.get("touches") is not None)
+        mins_present = sum(1 for r in clean if r.get("minutes_played") is not None)
+        logger.debug(f"[db.upsert_average_positions] incoming={len(rows)} mapped={pre} clean={len(clean)} touches_present={touch_present} minutes_present={mins_present}")
         if not clean:
             return (0, 0)
 

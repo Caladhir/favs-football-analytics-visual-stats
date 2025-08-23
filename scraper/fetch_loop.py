@@ -118,9 +118,9 @@ class FetchLoop:
                 if st:
                     row["_raw_statistics"] = st
 
-                pst = self._safe_fetch(f"event/{ev_id}/player-statistics")
-                if pst:
-                    row["_raw_player_stats"] = pst
+                # Intentionally skip player-statistics endpoint; it's unreliable (often 404)
+                # and leads to zeroed player stats when absent. We'll derive what we can
+                # from other sources (lineups, team statistics) and leave player_stats empty.
 
                 # managers (nije nužno, ali zgodno)
                 mgr = self._safe_fetch(f"event/{ev_id}/managers")
@@ -145,8 +145,8 @@ class FetchLoop:
                 eid = ee.get("event_id")
                 if ee.get("_raw_statistics"):
                     all_match_stats.extend(stats_processor.process_match_stats(ee["_raw_statistics"], eid))
-                if ee.get("_raw_player_stats"):
-                    all_player_stats.extend(stats_processor.process_player_stats(ee["_raw_player_stats"], eid))
+                # Skipping processing of player-level stats from the player-statistics endpoint
+                # because we no longer fetch it in enrichment.
 
             if all_match_stats:
                 bundle["match_stats"] = all_match_stats
@@ -244,6 +244,22 @@ class FetchLoop:
                 [p["sofascore_id"] for p in bundle.get("players", [])]
             ) if bundle.get("players") else {}
 
+            # Build a quick side→team_id map for this batch, keyed by (source, source_event_id, side)
+            side_team_map: Dict[Tuple[str, int, str], str] = {}
+            if matches:
+                for m in matches:
+                    try:
+                        src = m.get("source")
+                        sid = int(m.get("source_event_id")) if m.get("source_event_id") is not None else None
+                    except Exception:
+                        src, sid = None, None
+                    if not src or sid is None:
+                        continue
+                    if m.get("home_team_id"):
+                        side_team_map[(src, sid, "home")] = m["home_team_id"]
+                    if m.get("away_team_id"):
+                        side_team_map[(src, sid, "away")] = m["away_team_id"]
+
             # lineups
             lineups = bundle.get("lineups", [])
             if lineups:
@@ -292,6 +308,17 @@ class FetchLoop:
                         r["match_id"] = match_map[tup]
                     if (ps := r.get("player_sofascore_id")) in player_map:
                         r["player_id"] = player_map[ps]
+                    # Optional: set team_id if we can infer from side
+                    side = r.get("team")
+                    if side:
+                        try:
+                            sid = int(r.get("source_event_id")) if r.get("source_event_id") is not None else None
+                        except Exception:
+                            sid = None
+                        src = r.get("source")
+                        key = (src, sid, side)
+                        if key in side_team_map:
+                            r["team_id"] = side_team_map[key]
                 ok, fail = db.upsert_player_stats(pstats)
                 res["player_stats"] = {"ok": ok, "fail": fail}; total += ok
                 logger.info(f"✅ player_stats: ok={ok}, fail={fail}")
@@ -303,6 +330,17 @@ class FetchLoop:
                     tup = (r.get("source"), r.get("source_event_id"))
                     if tup in match_map:
                         r["match_id"] = match_map[tup]
+                    # Map side → team_id based on the match row we just upserted
+                    side = r.get("team")
+                    if side:
+                        try:
+                            sid = int(r.get("source_event_id")) if r.get("source_event_id") is not None else None
+                        except Exception:
+                            sid = None
+                        src = r.get("source")
+                        key = (src, sid, side)
+                        if key in side_team_map:
+                            r["team_id"] = side_team_map[key]
                 ok, fail = db.upsert_match_stats(mstats)
                 res["match_stats"] = {"ok": ok, "fail": fail}; total += ok
                 logger.info(f"✅ match_stats:  ok={ok}, fail={fail}")

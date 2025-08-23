@@ -27,7 +27,23 @@ export default function LiveMatchTicker() {
     const fetchLiveMatches = async () => {
       setLoading(true);
       try {
-        // 1) Fetch SofaScore rankings and build top150 set (use rowName / team.slug / team.name)
+        // 1) Build a set of DB competition IDs that correspond to TOP25 SofaScore IDs
+        let top25DbIds = new Set();
+        try {
+          const { data: comps, error: compErr } = await supabase
+            .from("competitions")
+            .select("id, sofascore_id")
+            .in("sofascore_id", TOP25_SOFA_IDS);
+          if (!compErr && comps) {
+            comps.forEach((c) => top25DbIds.add(c.id));
+          } else if (compErr) {
+            console.warn("Failed to map TOP25 competitions:", compErr.message);
+          }
+        } catch (e) {
+          console.warn("Error loading competitions for TOP25 mapping:", e);
+        }
+
+        // 2) Fetch SofaScore rankings and build top150 set (use rowName / team.slug / team.name)
         let top150Set = new Set();
         try {
           const r = await fetch(
@@ -49,7 +65,7 @@ export default function LiveMatchTicker() {
           console.error("Error fetching SofaScore rankings:", err);
         }
 
-        // 2) Fetch live/ht matches from supabase (broader set) and filter locally
+        // 3) Fetch live/ht matches from supabase (broader set) and filter locally
         const { data, error } = await supabase
           .from("matches")
           .select(
@@ -64,7 +80,8 @@ export default function LiveMatchTicker() {
         } else if (data) {
           // keep matches that are in top25 competitions OR involve a top150 team
           const filtered = data.filter((m) => {
-            if (TOP25_SOFA_IDS.includes(m.competition_id)) return true;
+            if (m.competition_id && top25DbIds.has(m.competition_id))
+              return true;
             const home = normalize(m.home_team);
             const away = normalize(m.away_team);
             if (top150Set.has(home) || top150Set.has(away)) return true;

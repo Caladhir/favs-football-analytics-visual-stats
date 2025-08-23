@@ -1,5 +1,6 @@
 # scraper/tools/nuclear_cleanup.py - SUPER AGRESIVNI CLEANUP ZA MASIVNE DUPLIKATE
 import sys
+import argparse
 import time
 from pathlib import Path
 from datetime import datetime, timezone
@@ -74,20 +75,15 @@ class NuclearCleanup:
             
             for match in all_live:
                 try:
-                    # SUPER STRICT signature - exact match detection
                     home = match['home_team'].strip().lower()
                     away = match['away_team'].strip().lower()
                     comp = match.get('competition', '').strip().lower()
-                    
-                    # Normalize start time to minute (not hour!)
                     start_dt = datetime.fromisoformat(match['start_time'].replace('Z', '+00:00'))
-                    normalized_time = start_dt.replace(second=0, microsecond=0)  # Keep minute precision
-                    
-                    signature = f"{home}|{away}|{normalized_time.isoformat()}|{comp}"
+                    normalized_time = start_dt.replace(second=0, microsecond=0)
+                    signature = (home, away, normalized_time, comp)
                     groups[signature].append(match)
-                    
                 except Exception as e:
-                    logger.warning(f"Skipping invalid match: {e}")
+                    logger.error(f"Failed to normalize match: {e}")
                     continue
             
             print(f"📊 Found {len(groups)} unique match signatures")
@@ -98,49 +94,17 @@ class NuclearCleanup:
             
             for signature, matches in groups.items():
                 if len(matches) > 1:
-                    duplicates_found += len(matches) - 1
-                    
-                    # Sort by updated_at DESC, keep most recent
-                    sorted_matches = sorted(
-                        matches, 
-                        key=lambda x: x.get('updated_at', ''), 
-                        reverse=True
-                    )
-                    
+                    # Zadrži najnoviji, obriši ostale
+                    sorted_matches = sorted(matches, key=lambda x: x.get('updated_at', ''), reverse=True)
                     to_keep = sorted_matches[0]
                     to_remove = sorted_matches[1:]
-                    
-                    # Extract team names for logging
-                    parts = signature.split('|')
-                    home_name = parts[0].title()
-                    away_name = parts[1].title()
-                    
-                    print(f"🔥 {home_name} vs {away_name}: removing {len(to_remove)} duplicates")
-                    
-                    # BATCH DELETE for speed
-                    ids_to_remove = [match['id'] for match in to_remove]
-                    
-                    # Delete in batches of 50
-                    for i in range(0, len(ids_to_remove), 50):
-                        batch_ids = ids_to_remove[i:i+50]
-                        
+                    for match in to_remove:
                         try:
-                            # Use PostgreSQL IN operator for batch delete
-                            result = db.client.table("matches").delete().in_("id", batch_ids).execute()
-                            removed_count += len(batch_ids)
-                            
+                            db.client.table("matches").delete().eq("id", match["id"]).execute()
+                            removed_count += 1
                         except Exception as e:
-                            # Fallback to individual deletes
-                            logger.warning(f"Batch delete failed, trying individual: {e}")
-                            for match_id in batch_ids:
-                                try:
-                                    db.client.table("matches").delete().eq("id", match_id).execute()
-                                    removed_count += 1
-                                except Exception as individual_e:
-                                    logger.error(f"Failed to delete {match_id}: {individual_e}")
-                        
-                        # Small delay between batches
-                        time.sleep(0.1)
+                            logger.error(f"Failed to remove {match['id']}: {e}")
+                    duplicates_found += 1
             
             self.stats['duplicates_removed'] = removed_count
             self.stats['total_after'] = self.get_live_count()
@@ -188,29 +152,11 @@ class NuclearCleanup:
             
             for match in all_live.data:
                 try:
-                    start_time = datetime.fromisoformat(match['start_time'].replace('Z', '+00:00'))
-                    hours_elapsed = (now - start_time).total_seconds() / 3600
-                    
-                    # Reset matches older than 1 hour (very aggressive)
-                    if hours_elapsed > 1:
-                        db.client.table("matches").update({
-                            "status": "finished",
-                            "status_type": "finished",
-                            "minute": None,
-                            "updated_at": now.isoformat()
-                        }).eq("id", match["id"]).execute()
-                        
-                        reset_count += 1
-                        
-                        if reset_count <= 10:  # Log first 10
-                            print(f"🔄 Reset: {match['home_team']} vs {match['away_team']} ({hours_elapsed:.1f}h old)")
-                        
+                    db.client.table("matches").update({"status": "finished"}).eq("id", match["id"]).execute()
+                    reset_count += 1
                 except Exception as e:
-                    logger.warning(f"Failed to reset match {match['id']}: {e}")
+                    logger.error(f"Failed to reset match {match['id']}: {e}")
             
-            if reset_count > 10:
-                print(f"... and {reset_count - 10} more matches reset")
-                
             print(f"✅ Reset {reset_count} live matches to finished")
             return reset_count
             
@@ -220,8 +166,6 @@ class NuclearCleanup:
 
 def main():
     """Main nuclear cleanup"""
-    import argparse
-    
     parser = argparse.ArgumentParser(description='Nuclear cleanup for massive duplicates')
     parser.add_argument('--confirm', action='store_true', 
                        help='Confirm you want to run nuclear cleanup')

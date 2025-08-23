@@ -33,8 +33,8 @@ class DataAnalyzer:
             status_counts = {}
             
             for status in statuses:
-                result = db.client.table("matches").select("count", count="exact").eq("status", status).execute()
-                status_counts[status] = result.count if hasattr(result, 'count') else 0
+                count_result = db.client.table("matches").select("count", count="exact").eq("status", status).execute()
+                status_counts[status] = count_result.count if hasattr(count_result, 'count') else 0
             
             # Get detailed data for analysis
             matches = db.client.table("matches").select(
@@ -46,8 +46,7 @@ class DataAnalyzer:
             print(f"Total matches in database: {total_matches:,}")
             print("\nBy status:")
             for status, count in status_counts.items():
-                percentage = (count / total_matches * 100) if total_matches > 0 else 0
-                print(f"  {status.capitalize():>10}: {count:>6,} ({percentage:>5.1f}%)")
+                print(f"  {status}: {count}")
             
             # Competition analysis
             competitions = [match['competition'] for match in matches.data if match.get('competition')]
@@ -110,9 +109,7 @@ class DataAnalyzer:
             
             print(f"Checked {total_checked:,} matches for quality issues:")
             for issue, count in quality_issues.items():
-                if count > 0:
-                    percentage = (count / total_checked * 100)
-                    print(f"  ❌ {issue.replace('_', ' ').title()}: {count} ({percentage:.1f}%)")
+                print(f"  {issue}: {count}")
             
             # Check for duplicates
             print(f"\n🔍 Checking for duplicates...")
@@ -124,19 +121,16 @@ class DataAnalyzer:
             
             match_signatures = []
             for match in all_matches.data:
-                signature = f"{match.get('home_team', '')}-{match.get('away_team', '')}-{match.get('start_time', '')}"
-                match_signatures.append(signature)
+                sig = f"{match['home_team']}|{match['away_team']}|{match['start_time']}"
+                match_signatures.append(sig)
             
             signature_counter = Counter(match_signatures)
             duplicates = {sig: count for sig, count in signature_counter.items() if count > 1}
             
             if duplicates:
-                print(f"  ❌ Found {len(duplicates)} potential duplicate groups")
-                print(f"  Top 5 duplicates:")
-                for sig, count in list(duplicates.items())[:5]:
-                    print(f"    {sig}: {count} copies")
+                print(f"Found {len(duplicates)} duplicate groups.")
             else:
-                print(f"  ✅ No obvious duplicates found")
+                print("No duplicates found.")
             
             self.stats['quality_issues'] = quality_issues
             self.stats['duplicates'] = len(duplicates)

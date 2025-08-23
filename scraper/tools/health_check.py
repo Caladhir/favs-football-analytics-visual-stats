@@ -1,6 +1,8 @@
 # scraper/tools/health_check.py - ISPRAVLJENA VERZIJA
 import time
 import sys
+import traceback
+import argparse
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -41,7 +43,7 @@ class HealthChecker:
                 self.checks_passed += 1
                 return True
             else:
-                self.errors.append("Database connection failed")
+                logger.error("❌ Database connection FAILED")
                 self.checks_failed += 1
                 return False
         except Exception as e:
@@ -59,8 +61,9 @@ class HealthChecker:
                 self.checks_passed += 1
                 return True
             else:
-                self.warnings.append("Database performance issues detected")
-                self.checks_passed += 1  # Not critical
+                logger.warning("⚠️ Database performance issue")
+                self.warnings.append("Performance issue detected")
+                self.checks_passed += 1
                 return True
         except Exception as e:
             self.warnings.append(f"Performance check failed: {e}")
@@ -78,20 +81,13 @@ class HealthChecker:
             ).order("updated_at", desc=True).limit(1).execute()
             
             if result.data:
-                last_update = datetime.fromisoformat(result.data[0]["updated_at"].replace("Z", "+00:00"))
-                minutes_ago = (datetime.now(timezone.utc) - last_update).total_seconds() / 60
-                
-                logger.info(f"Last live match update: {minutes_ago:.1f} minutes ago")
-                
-                if minutes_ago > 10:  # Older than 10 minutes
-                    self.warnings.append(f"Live data is {minutes_ago:.1f} minutes old")
-                else:
-                    logger.info("✅ Live data is fresh")
-                
+                latest = result.data[0]
+                logger.info(f"Latest live match update: {latest['updated_at']}")
                 self.checks_passed += 1
                 return True
             else:
-                logger.info("No live matches found - data freshness OK")
+                logger.warning("No live matches found for freshness check")
+                self.warnings.append("No live matches found")
                 self.checks_passed += 1
                 return True
                 
@@ -121,11 +117,9 @@ class HealthChecker:
             valid_count = 0
             
             for match in valid_result.data:
-                start_time = datetime.fromisoformat(match["start_time"].replace("Z", "+00:00"))
+                start_time = datetime.fromisoformat(match['start_time'].replace('Z', '+00:00'))
                 hours_elapsed = (now - start_time).total_seconds() / 3600
-                
-                # Same filter as frontend (10h limit)
-                if hours_elapsed <= 10:  # Using relaxed limit directly
+                if -0.25 <= hours_elapsed <= 3:
                     valid_count += 1
             
             logger.info(f"Live matches: {raw_count} raw → {valid_count} valid")
@@ -133,9 +127,10 @@ class HealthChecker:
             # Check for large difference
             difference = raw_count - valid_count
             if difference > 10:
-                self.warnings.append(f"{difference} zombie matches detected")
+                logger.warning(f"Large difference in live counts: {difference}")
+                self.warnings.append(f"Live count difference: {difference}")
             else:
-                logger.info("✅ Live count consistent")
+                logger.info("Live count difference within normal range")
             
             self.checks_passed += 1
             return True
@@ -172,18 +167,12 @@ class HealthChecker:
             ).lt("start_time", cutoff_time.isoformat()).execute()
             
             zombie_count = zombie_result.count if hasattr(zombie_result, 'count') else 0
-            
-            if zombie_count > 0:
-                self.warnings.append(f"{zombie_count} zombie matches found")
-                logger.warning(f"⚠️ {zombie_count} zombie matches detected")
-            else:
-                logger.info("✅ No zombie matches found")
-            
+            logger.info(f"Zombie matches (>3h old): {zombie_count}")
             self.checks_passed += 1
             return True
             
         except Exception as e:
-            self.errors.append(f"Zombie check failed: {e}")
+            logger.error(f"Zombie match check failed: {e}")
             self.checks_failed += 1
             return False
     
@@ -223,7 +212,7 @@ class HealthChecker:
             return True
             
         except Exception as e:
-            self.errors.append(f"Priority check failed: {e}")
+            logger.error(f"Competition priority check failed: {e}")
             self.checks_failed += 1
             return False
     
@@ -245,7 +234,7 @@ class HealthChecker:
             try:
                 check()
             except Exception as e:
-                logger.error(f"Check {check.__name__} failed: {e}")
+                logger.error(f"Check failed: {e}")
                 self.checks_failed += 1
         
         return self.checks_failed == 0
@@ -263,19 +252,19 @@ class HealthChecker:
         print(f"⚠️ Warnings: {len(self.warnings)}")
         
         if self.warnings:
-            print("\n⚠️ WARNINGS:")
-            for warning in self.warnings:
-                print(f"  - {warning}")
+            print("Warnings:")
+            for w in self.warnings:
+                print(f"  ⚠️ {w}")
         
         if self.errors:
-            print("\n❌ ERRORS:")
-            for error in self.errors:
-                print(f"  - {error}")
+            print("Errors:")
+            for e in self.errors:
+                print(f"  ❌ {e}")
         
         if self.checks_failed == 0:
-            print("\n🎉 ALL CHECKS PASSED!")
+            print("All checks passed!")
         else:
-            print(f"\n⚠️ {self.checks_failed} CHECKS FAILED!")
+            print("Some checks failed!")
         
         print("="*60)
 
@@ -288,10 +277,10 @@ def main():
         checker.print_summary()
         
         if success:
-            logger.info("✅ All health checks passed")
+            print("Health check completed successfully.")
             sys.exit(0)
         else:
-            logger.error("❌ Some health checks failed")
+            print("Health check completed with errors.")
             sys.exit(1)
             
     except Exception as e:

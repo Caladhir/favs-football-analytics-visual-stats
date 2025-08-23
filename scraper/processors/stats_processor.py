@@ -172,3 +172,30 @@ class StatsProcessor:
         return out
 
 stats_processor = StatsProcessor()
+
+# --- Backwards compatibility helper ---
+def parse_event_statistics(event_id: int, raw: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """Compatibility wrapper used by legacy scripts.
+
+    Returns a dict with keys 'match_stats' and 'player_stats' derived from
+    the provided raw statistics payload. This does not make any network
+    calls and relies solely on the given data structure.
+
+    Note: Player stats are only extracted if the raw payload includes
+    player lists under 'home'/'away' (or a 'players' list). We do not
+    fetch the deprecated 'player-statistics' endpoint.
+    """
+    try:
+        match_stats = stats_processor.process_match_stats(raw or {}, event_id)
+    except Exception:
+        match_stats = []
+
+    player_stats: List[Dict[str, Any]] = []
+    try:
+        # Only attempt player parsing if payload hints players are present
+        if isinstance(raw, dict) and ("home" in raw or "away" in raw or "players" in raw):
+            player_stats = stats_processor.process_player_stats(raw, event_id)
+    except Exception:
+        player_stats = []
+
+    return {"match_stats": match_stats, "player_stats": player_stats}

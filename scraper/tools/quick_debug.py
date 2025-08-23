@@ -104,11 +104,34 @@ def quick_status_check():
 def cleanup_zombies_now():
     """Odmah očisti zombie utakmice"""
     print("\n🧹 CLEANING ZOMBIE MATCHES NOW...")
-    
     try:
-        cleaned = db.cleanup_zombie_matches(hours_old=3)
-        print(f"✅ Cleaned {cleaned} zombie matches")
-        return cleaned
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=3)
+        # 1) Select first to get count of rows to be updated (no long URLs, server-side filters)
+        sel = (
+            db.client
+            .table("matches")
+            .select("id")
+            .in_("status", ["live", "ht", "inprogress", "halftime"]) 
+            .lt("start_time", cutoff.isoformat())
+            .execute()
+        )
+        target_ids = [row.get("id") for row in (sel.data or [])]
+
+        # 2) Perform the filtered update (no chaining select on update)
+        upd = (
+            db.client
+            .table("matches")
+            .update({"status": "finished"})
+            .in_("status", ["live", "ht", "inprogress", "halftime"]) 
+            .lt("start_time", cutoff.isoformat())
+            .execute()
+        )
+
+        # Some clients return updated rows, some don't; fallback to pre-count
+        updated = len(upd.data or []) if isinstance(upd.data, list) else len(target_ids)
+        print(f"✅ Cleaned {updated} zombie matches")
+        return updated
     except Exception as e:
         print(f"❌ Cleanup failed: {e}")
         return 0

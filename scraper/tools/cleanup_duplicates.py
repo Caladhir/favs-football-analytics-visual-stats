@@ -1,5 +1,6 @@
 # scraper/tools/cleanup_duplicates.py - ČISTI DUPLIKATE IZ BAZE
 import sys
+import argparse
 from pathlib import Path
 from datetime import datetime, timezone
 from collections import defaultdict
@@ -48,18 +49,16 @@ class DuplicateCleanup:
                     try:
                         dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
                         normalized_time = dt.replace(minute=0, second=0, microsecond=0).isoformat()
-                    except:
-                        normalized_time = start_time[:13] + ":00:00+00:00"  # Fallback
+                    except Exception:
+                        normalized_time = start_time[:13]  # fallback: YYYY-MM-DDTHH
                 else:
                     normalized_time = "unknown"
-                
                 signature = (
-                    match.get('home_team', '').strip().lower(),
-                    match.get('away_team', '').strip().lower(),
+                    (match.get('home_team') or '').strip().lower(),
+                    (match.get('away_team') or '').strip().lower(),
                     normalized_time,
-                    match.get('competition', '').strip().lower()
+                    (match.get('competition') or '').strip().lower()
                 )
-                
                 match_groups[signature].append(match)
             
             # Filtriraj samo grupe s duplikatima
@@ -117,12 +116,12 @@ class DuplicateCleanup:
                     try:
                         db.client.table("matches").delete().eq("id", match["id"]).execute()
                         removed_count += 1
-                        logger.debug(f"    ❌ Removed: {match['id']}")
+                        logger.info(f"    Removed: {match['id']}")
                     except Exception as e:
                         logger.error(f"    Failed to remove {match['id']}: {e}")
                 else:
                     removed_count += 1
-                    logger.debug(f"    [DRY RUN] Would remove: {match['id']}")
+                    logger.debug(f"    Would remove: {match['id']}")
         
         self.stats['duplicates_removed'] = removed_count
         self.stats['kept_matches'] = self.stats['total_matches'] - removed_count

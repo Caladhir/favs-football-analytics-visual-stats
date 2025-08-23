@@ -206,6 +206,17 @@ class BrowserManager:
         Dohvati JSON s SofaScore API-ja preko browsera.
         Automatski rješava invalid session i radi retrye s eksponencijalnim čekanjem.
         """
+        # Safety net: block known-problematic endpoints
+        try:
+            ep_l = (endpoint or "").lower()
+        except Exception:
+            ep_l = ""
+        blocked = (
+            "player-statistics",  # unreliable and not used by our pipeline
+        )
+        if any(b in ep_l for b in blocked):
+            logger.warning(f"Blocked fetch for endpoint: {endpoint}")
+            return {"__error__": 451, "__msg__": "blocked endpoint", "endpoint": endpoint}
         for attempt in range(max_retries):
             try:
                 logger.info(f"Fetching {endpoint} (attempt {attempt + 1}/{max_retries})")

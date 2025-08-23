@@ -38,11 +38,12 @@ def debug_time_issues():
             
             # Convert string back to datetime
             if start_time_str.endswith('Z'):
-                start_time_str = start_time_str[:-1] + '+00:00'
+                start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
             elif '+00:00' not in start_time_str:
-                start_time_str += '+00:00'
-                
-            start_time = datetime.fromisoformat(start_time_str)
+                start_time = datetime.fromisoformat(start_time_str + '+00:00')
+            else:
+                start_time = datetime.fromisoformat(start_time_str)
+            
             local_time = start_time.astimezone()  # Convert to local time
             
             # Time calculations
@@ -57,9 +58,9 @@ def debug_time_issues():
             
             # Flag suspicious entries
             if match['status'] in ['live', 'ht'] and hours_elapsed > 3:
-                print(f"    ⚠️ ZOMBIE: Live match {hours_elapsed:.1f}h old")
+                print(f"    ⚠️ ZOMBIE MATCH (>3h old)")
             elif match['status'] in ['live', 'ht'] and hours_elapsed < -0.25:
-                print(f"    ⚠️ FUTURE: Live match in future")
+                print(f"    ⚠️ FUTURE MATCH (starts in {abs(hours_elapsed):.1f}h)")
             
             print()
         
@@ -153,7 +154,7 @@ def check_specific_match(match_id: str):
         result = db.client.table("matches").select("*").eq("id", match_id).execute()
         
         if not result.data:
-            print(f"❌ Match {match_id} not found")
+            print("No match found.")
             return
         
         match = result.data[0]
@@ -172,19 +173,10 @@ def check_specific_match(match_id: str):
         
         # Time analysis
         if match['start_time']:
-            start_time_str = match['start_time']
-            if start_time_str.endswith('Z'):
-                start_time_str = start_time_str[:-1] + '+00:00'
-            
-            start_time = datetime.fromisoformat(start_time_str)
+            start_time = datetime.fromisoformat(match['start_time'].replace('Z', '+00:00'))
             now = datetime.now(timezone.utc)
-            
             hours_elapsed = (now - start_time).total_seconds() / 3600
-            minutes_elapsed = (now - start_time).total_seconds() / 60
-            
-            print(f"\n⏰ TIME ANALYSIS:")
-            print(f"Hours elapsed: {hours_elapsed:.2f}")
-            print(f"Minutes elapsed: {minutes_elapsed:.0f}")
+            print(f"    Hours elapsed since start: {hours_elapsed:.1f}h")
             
             if match['status'] in ['live', 'ht']:
                 if hours_elapsed > 3:

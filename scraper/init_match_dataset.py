@@ -167,29 +167,8 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
         team_map = db.get_team_ids_by_sofa([t.get("sofascore_id") for t in teams]) if teams else {}
 
         # Players: attach team_id if parser left team_sofascore_id
-        # (ENH) U nekim slučajevima shotmap sadrži igrače koji nisu bili u lineups (npr. kasni sub / own goal atribucija) → dodaj placeholder igrače
         players = []
-        base_players_list = bundle.get("players", []) or []
-        existing_player_ids = {p.get("sofascore_id") for p in base_players_list if p.get("sofascore_id")}
-        # Skupi potencijalno propuštene igrače iz shots prije mapiranja
-        missing_from_shots: set[int] = set()
-        for s in (bundle.get("shots") or []):
-            pid = s.get("player_sofascore_id")
-            if pid and pid not in existing_player_ids:
-                missing_from_shots.add(pid)
-            apid = s.get("assist_player_sofascore_id")
-            if apid and apid not in existing_player_ids:
-                missing_from_shots.add(apid)
-        if missing_from_shots:
-            # Dodaj minimalne zapise; ime kasnije možemo popuniti iz drugih endpointa ako dođe
-            for pid in missing_from_shots:
-                base_players_list.append({
-                    "sofascore_id": pid,
-                    # placeholder polja – izbjegavamo None za NOT NULL ako ih tablica ne traži
-                    "full_name": None,
-                })
-            logger.info(f"[players] dodano placeholder iz shots count={len(missing_from_shots)}")
-        for p in base_players_list:
+        for p in bundle.get("players", []) or []:
             p2 = dict(p)
             tsid = p2.pop("team_sofascore_id", None)
             if tsid is not None and tsid in team_map and not p2.get("team_id"):
@@ -197,7 +176,6 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
             players.append(p2)
         if players:
             counts["players"] = db.upsert_players(players)
-            logger.info(f"[players] upsert total={len(players)} (uklj.placeholder) base={len(base_players_list)}")
         # manager upserts after players so we can map team ids similarly
         managers = []
         for m in bundle.get("managers", []) or []:
@@ -408,18 +386,18 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
                     f"[events] none mapped raw={len(raw_events)} (possible key mismatch)"
                 )
 
-        # shots transform (FK mapping) – was previously removed; reintroduce
+        # shots transform (enhanced mapping similar to legacy script)
         raw_shots_rows = bundle.get("shots", []) or []
         shot_rows: list[dict[str, Any]] = []
-        drop_mid=drop_player=drop_minute=drop_xy=drop_outcome=0
-        derived_minute=0
+        drop_mid = drop_player = drop_minute = drop_xy = drop_outcome = 0
+        derived_minute = 0
         for r in raw_shots_rows:
             try:
                 eid = r.get("source_event_id")
                 mid = se_to_mid.get(eid)
                 if not mid:
-                    drop_mid +=1; continue
-                # player id may be flat (player_sofascore_id) or nested (player.id)
+                    drop_mid += 1; continue
+                # player id may be flat or nested
                 player_src = r.get("player_sofascore_id")
                 if player_src is None:
                     p_obj = r.get("player") or {}
@@ -427,45 +405,88 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
                         player_src = p_obj.get("id")
                 player_id = player_map.get(player_src) if player_src is not None else None
                 if not player_id:
-                    drop_player +=1; continue
-                # minute can be explicit, nested time.minute, or raw integer "time"
+                    drop_player += 1; continue
+                # minute derivation (explicit, nested time block, integer 'time', fallback sentinel)
                 minute = r.get("minute")
                 if minute is None:
                     t_block = r.get("time")
                     if isinstance(t_block, dict) and t_block.get("minute") is not None:
-                        minute = t_block.get("minute"); derived_minute +=1
+                        minute = t_block.get("minute"); derived_minute += 1
                     elif isinstance(t_block, int):
-                        # SofaScore shotmap uses integer 'time' for minute
-                        minute = t_block; derived_minute +=1
+                        minute = t_block; derived_minute += 1
                     else:
-                        # fallback sentinel (do NOT drop row)
-                        minute = -1; drop_minute +=1
-                # seconds – prefer explicit second, else timeSeconds modulo 60
+                        minute = -1; drop_minute += 1  # sentinel, don't skip row
+                # second derivation
                 second_val = r.get("second")
                 if second_val is None:
                     ts = r.get("timeSeconds")
                     if isinstance(ts, (int, float)):
                         second_val = int(ts % 60)
-                # coordinates may be flat x/y or nested in playerCoordinates
+                # coordinates (flat or nested coordinates dict)
                 x = r.get("x"); y = r.get("y")
                 if x is None or y is None:
                     pc = r.get("playerCoordinates") or r.get("player_coordinates") or {}
                     if isinstance(pc, dict):
-                        x = x if x is not None else pc.get("x")
-                        y = y if y is not None else pc.get("y")
+                        if x is None: x = pc.get("x")
+                        if y is None: y = pc.get("y")
                 if x is None or y is None:
-                    drop_xy +=1; continue
-                # outcome may be under 'outcome' or 'shotType'
-                outcome = r.get("outcome") or r.get("shotType")
-                if outcome is None:
-                    drop_outcome +=1; continue
+                    drop_xy += 1; continue
+                # outcome normalization (DB allowed: goal,on_target,off_target,blocked,saved,woodwork,saved_off_target)
+                raw_out = (r.get("outcome") or r.get("shotType") or "")
+                if isinstance(raw_out, str):
+                    raw_key = raw_out.replace("-", "_").lower()
+                else:
+                    raw_key = ""
+                # lazy init mapping dict once (store on function attribute to avoid redeclaring)
+                if not hasattr(store_bundle, "_shot_outcome_map"):
+                    store_bundle._shot_outcome_map = {
+                        "goal": "goal",
+                        "save": "saved",
+                        "saved": "saved",
+                        "miss": "off_target",
+                        "off_target": "off_target",
+                        "shot_off_target": "off_target",
+                        "block": "blocked",
+                        "blocked": "blocked",
+                        "post": "woodwork",
+                        "woodwork": "woodwork",
+                        "bar": "woodwork",
+                        "shot_on_target": "on_target",
+                        "on_target": "on_target",
+                        "on_target_saved": "saved",
+                        "saved_off_target": "saved_off_target",
+                    }
+                outcome = store_bundle._shot_outcome_map.get(raw_key)
+                if not outcome:
+                    # heuristic fallbacks
+                    if "goal" in raw_key:
+                        outcome = "goal"
+                    elif "save" in raw_key:
+                        outcome = "saved"
+                    elif "block" in raw_key:
+                        outcome = "blocked"
+                    elif "post" in raw_key or "bar" in raw_key:
+                        outcome = "woodwork"
+                    elif "miss" in raw_key or "off" in raw_key:
+                        outcome = "off_target"
+                if outcome not in {"goal","on_target","off_target","blocked","saved","woodwork","saved_off_target"}:
+                    drop_outcome += 1; continue
+                # derive penalty / own goal flags from goalType if not already set
+                if r.get("goalType") and r.get("is_penalty") is None:
+                    gt = str(r.get("goalType")).lower()
+                    if "pen" in gt:
+                        r["is_penalty"] = True
+                if r.get("goalType") and r.get("is_own_goal") is None:
+                    gt = str(r.get("goalType")).lower()
+                    if "own" in gt:
+                        r["is_own_goal"] = True
                 assist_src = r.get("assist_player_sofascore_id")
                 assist_id = player_map.get(assist_src) if assist_src is not None else None
                 side = r.get("team")
-                if side not in ("home","away") and isinstance(r.get("isHome"), bool):
+                if side not in ("home", "away") and isinstance(r.get("isHome"), bool):
                     side = "home" if r.get("isHome") else "away"
-                team_id=None
-                if side in ("home","away"):
+                team_id = None
+                if side in ("home", "away"):
                     team_id = (side_team_cache.get(str(eid)) or {}).get(side)
                 shot_rows.append({
                     "match_id": mid,
@@ -489,11 +510,12 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
             except Exception:
                 continue
         if shot_rows:
-            logger.info(f"[shots] prepared rows={len(shot_rows)} raw={len(raw_shots_rows)} drops mid={drop_mid} player={drop_player} minute_dropped={drop_minute} minute_derived={derived_minute} xy={drop_xy} outcome={drop_outcome} sample_keys={list(shot_rows[0].keys()) if shot_rows else None}")
+            logger.info(
+                f"[shots] prepared rows={len(shot_rows)} raw={len(raw_shots_rows)} drops mid={drop_mid} player={drop_player} minute_dropped={drop_minute} minute_derived={derived_minute} xy={drop_xy} outcome={drop_outcome} sample_keys={list(shot_rows[0].keys()) if shot_rows else None}"
+            )
             counts["shots"] = db.upsert_shots(shot_rows)
         else:
             if raw_shots_rows:
-                # extra debug: inspect first 5 raw entries structure to understand missing minute/x/y
                 sample = []
                 for s in raw_shots_rows[:5]:
                     sample.append({
@@ -505,72 +527,91 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
                         "player_sofa": s.get("player_sofascore_id"),
                         "event_id": s.get("source_event_id"),
                         "outcome": s.get("outcome"),
-                        "raw_keys": list(s.keys())
+                        "raw_keys": list(s.keys()),
                     })
                 logger.debug(f"[shots][debug sample] first5={sample}")
-                logger.warning(f"[shots] first pass zero mapped raw={len(raw_shots_rows)} mid={drop_mid} player={drop_player} minute={drop_minute} xy={drop_xy} outcome={drop_outcome}")
-            # Ako je najviše dropova zbog player_id, pokušaj drugi pass nakon što možda sada imamo nove player_id (placeholder upsert)
-            if raw_shots_rows and drop_player > 0 and (drop_player >= (len(raw_shots_rows) * 0.6)):
-                logger.info("[shots] second-pass attempt (player_id mapping)")
-                # refresh player_map
-                player_map_second = db.get_player_ids_by_sofa([p.get("sofascore_id") for p in players]) if players else {}
-                shot_rows2 = []
-                drop_player2=0
-                for r in raw_shots_rows:
-                    try:
-                        eid = r.get("source_event_id")
-                        mid = se_to_mid.get(eid)
-                        if not mid:
-                            continue
-                        player_src = r.get("player_sofascore_id")
-                        player_id = player_map_second.get(player_src) if player_src is not None else None
-                        if not player_id:
-                            drop_player2 +=1; continue
-                        minute = r.get("minute")
-                        if minute is None:
-                            t_block = r.get("time") or {}
-                            if isinstance(t_block, dict) and t_block.get("minute") is not None:
-                                minute = t_block.get("minute")
+                logger.warning(
+                    f"[shots] first pass zero mapped raw={len(raw_shots_rows)} mid={drop_mid} player={drop_player} minute={drop_minute} xy={drop_xy} outcome={drop_outcome}"
+                )
+                # optional: second pass if player mapping likely improved later (>=60% player drops)
+                if drop_player > 0 and (drop_player >= (len(raw_shots_rows) * 0.6)):
+                    logger.info("[shots] second-pass attempt (player_id mapping)")
+                    player_map_second = db.get_player_ids_by_sofa([p.get("sofascore_id") for p in players]) if players else {}
+                    shot_rows2 = []
+                    drop_player2 = 0
+                    for r in raw_shots_rows:
+                        try:
+                            eid = r.get("source_event_id")
+                            mid = se_to_mid.get(eid)
+                            if not mid:
+                                continue
+                            player_src = r.get("player_sofascore_id")
+                            player_id = player_map_second.get(player_src) if player_src is not None else None
+                            if not player_id:
+                                drop_player2 += 1; continue
+                            minute = r.get("minute") or -1
+                            x = r.get("x"); y = r.get("y")
+                            if x is None or y is None:
+                                continue
+                            raw_out = (r.get("outcome") or r.get("shotType") or "")
+                            if isinstance(raw_out, str):
+                                raw_key = raw_out.replace("-", "_").lower()
                             else:
-                                minute = -1
-                        x=r.get("x"); y=r.get("y")
-                        if x is None or y is None:
+                                raw_key = ""
+                            outcome = store_bundle._shot_outcome_map.get(raw_key)
+                            if not outcome:
+                                if "goal" in raw_key:
+                                    outcome = "goal"
+                                elif "save" in raw_key:
+                                    outcome = "saved"
+                                elif "block" in raw_key:
+                                    outcome = "blocked"
+                                elif "post" in raw_key or "bar" in raw_key:
+                                    outcome = "woodwork"
+                                elif "miss" in raw_key or "off" in raw_key:
+                                    outcome = "off_target"
+                            if outcome not in {"goal","on_target","off_target","blocked","saved","woodwork","saved_off_target"}:
+                                continue
+                            if r.get("goalType") and r.get("is_penalty") is None:
+                                gt = str(r.get("goalType")).lower()
+                                if "pen" in gt:
+                                    r["is_penalty"] = True
+                            if r.get("goalType") and r.get("is_own_goal") is None:
+                                gt = str(r.get("goalType")).lower()
+                                if "own" in gt:
+                                    r["is_own_goal"] = True
+                            assist_src = r.get("assist_player_sofascore_id")
+                            assist_id = player_map_second.get(assist_src) if assist_src is not None else None
+                            side = r.get("team")
+                            team_id = None
+                            if side in ("home", "away"):
+                                team_id = (side_team_cache.get(str(eid)) or {}).get(side)
+                            shot_rows2.append({
+                                "match_id": mid,
+                                "team_id": team_id,
+                                "player_id": player_id,
+                                "assist_player_id": assist_id,
+                                "minute": minute,
+                                "second": r.get("second"),
+                                "x": x,
+                                "y": y,
+                                "xg": r.get("xg"),
+                                "body_part": r.get("body_part"),
+                                "situation": r.get("situation"),
+                                "is_penalty": r.get("is_penalty"),
+                                "is_own_goal": r.get("is_own_goal"),
+                                "outcome": outcome,
+                                "source": "sofascore",
+                                "source_event_id": eid,
+                                "source_item_id": r.get("source_item_id"),
+                            })
+                        except Exception:
                             continue
-                        outcome = r.get("outcome")
-                        if outcome is None:
-                            continue
-                        assist_src = r.get("assist_player_sofascore_id")
-                        assist_id = player_map_second.get(assist_src) if assist_src is not None else None
-                        side = r.get("team")
-                        team_id=None
-                        if side in ("home","away"):
-                            team_id = (side_team_cache.get(str(eid)) or {}).get(side)
-                        shot_rows2.append({
-                            "match_id": mid,
-                            "team_id": team_id,
-                            "player_id": player_id,
-                            "assist_player_id": assist_id,
-                            "minute": minute,
-                            "second": r.get("second"),
-                            "x": x,
-                            "y": y,
-                            "xg": r.get("xg"),
-                            "body_part": r.get("body_part"),
-                            "situation": r.get("situation"),
-                            "is_penalty": r.get("is_penalty"),
-                            "is_own_goal": r.get("is_own_goal"),
-                            "outcome": outcome,
-                            "source": "sofascore",
-                            "source_event_id": eid,
-                            "source_item_id": r.get("source_item_id"),
-                        })
-                    except Exception:
-                        continue
-                if shot_rows2:
-                    logger.info(f"[shots] second-pass mapped rows={len(shot_rows2)} (player_drops_second={drop_player2})")
-                    counts["shots"] = db.upsert_shots(shot_rows2)
-                else:
-                    logger.warning(f"[shots] second-pass failed rows player_drop_second={drop_player2}")
+                    if shot_rows2:
+                        logger.info(f"[shots] second-pass mapped rows={len(shot_rows2)} (player_drops_second={drop_player2})")
+                        counts["shots"] = db.upsert_shots(shot_rows2)
+                    else:
+                        logger.warning(f"[shots] second-pass failed rows player_drop_second={drop_player2}")
         ms_rows = []
         for r in bundle.get("match_stats", []) or []:
             eid = r.get("source_event_id")
@@ -1054,6 +1095,24 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
                 base = enr.get("event") or {}
                 home_tid = (base.get("homeTeam") or {}).get("id")
                 away_tid = (base.get("awayTeam") or {}).get("id")
+                # outcome normalization map
+                _shot_out_map = {
+                    "goal": "goal",
+                    "save": "saved",
+                    "saved": "saved",
+                    "miss": "off_target",
+                    "off_target": "off_target",
+                    "shot_off_target": "off_target",
+                    "block": "blocked",
+                    "blocked": "blocked",
+                    "post": "woodwork",
+                    "woodwork": "woodwork",
+                    "bar": "woodwork",
+                    "shot_on_target": "on_target",
+                    "on_target": "on_target",
+                    "on_target_saved": "saved",
+                    "saved_off_target": "saved_off_target",
+                }
                 for idx, s in enumerate(candidates):
                     if not isinstance(s, dict):
                         continue
@@ -1062,26 +1121,68 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
                         assist = (s.get("assist") or {}) if isinstance(s.get("assist"), dict) else {}
                         tid = (s.get("team") or {}).get("id") if isinstance(s.get("team"), dict) else s.get("teamId")
                         side = "home" if tid and tid == home_tid else ("away" if tid and tid == away_tid else None)
+                        if side is None and isinstance(s.get("isHome"), bool):
+                            side = "home" if s.get("isHome") else "away"
+                        # minute + second derivation
                         minute = s.get("minute")
                         if minute is None:
-                            t_block = s.get("time") or {}
-                            if isinstance(t_block, dict):
-                                minute = t_block.get("minute")
+                            # shotmap often has integer 'time'
+                            minute = s.get("time")
+                        if isinstance(minute, dict):
+                            minute = minute.get("minute")
+                        time_seconds = s.get("timeSeconds")
+                        second_val = s.get("second")
+                        if second_val is None and isinstance(time_seconds, (int, float)):
+                            second_val = int(time_seconds % 60)
+                        # coordinates: prefer playerCoordinates
+                        x = s.get("x")
+                        y = s.get("y")
+                        if x is None or y is None:
+                            pc = s.get("playerCoordinates") or {}
+                            if isinstance(pc, dict):
+                                if x is None:
+                                    x = pc.get("x")
+                                if y is None:
+                                    y = pc.get("y")
+                        if x is None or y is None:
+                            pos = s.get("position") or {}
+                            if isinstance(pos, dict):
+                                if x is None:
+                                    x = pos.get("x")
+                                if y is None:
+                                    y = pos.get("y")
+                        # outcome normalization
+                        raw_out = (s.get("shotType") or s.get("outcome") or s.get("shotResult") or "")
+                        raw_key = raw_out.replace("-", "_").lower() if isinstance(raw_out, str) else ""
+                        outcome = _shot_out_map.get(raw_key)
+                        if not outcome:
+                            if "goal" in raw_key:
+                                outcome = "goal"
+                            elif "save" in raw_key:
+                                outcome = "saved"
+                            elif "block" in raw_key:
+                                outcome = "blocked"
+                            elif "post" in raw_key or "bar" in raw_key:
+                                outcome = "woodwork"
+                            elif "miss" in raw_key or "off" in raw_key:
+                                outcome = "off_target"
                         shots_all.append({
                             "source_event_id": enr.get("event_id"),
                             "player_sofascore_id": player.get("id"),
                             "assist_player_sofascore_id": assist.get("id"),
                             "team": side,
+                            "isHome": s.get("isHome"),
                             "minute": minute,
-                            "second": s.get("second"),
-                            "x": s.get("x") if s.get("x") is not None else (s.get("position") or {}).get("x"),
-                            "y": s.get("y") if s.get("y") is not None else (s.get("position") or {}).get("y"),
+                            "second": second_val,
+                            "timeSeconds": time_seconds,
+                            "x": x,
+                            "y": y,
                             "xg": s.get("xg") if s.get("xg") is not None else s.get("expectedGoals"),
                             "body_part": s.get("bodyPart"),
                             "situation": s.get("situation"),
                             "is_penalty": s.get("isPenalty") or s.get("penalty"),
                             "is_own_goal": s.get("isOwnGoal") or s.get("ownGoal"),
-                            "outcome": s.get("outcome") or s.get("shotResult"),
+                            "outcome": outcome,
                             "source": "sofascore",
                             "source_item_id": s.get("id") or idx,
                         })
