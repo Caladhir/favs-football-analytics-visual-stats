@@ -1,4 +1,3 @@
-# scraper/processors/match_processor.py
 from __future__ import annotations
 from typing import Any, Dict, List
 from datetime import datetime, timezone
@@ -12,10 +11,9 @@ from .shots_processor import shots_processor
 from .avg_positions_processor import avg_positions_processor
 
 def _get(dt_val) -> str:
-    # Vrati ISO8601 u UTC ako postoji timestamp/iso u eventu
     if not dt_val:
         return None
-    if isinstance(dt_val, (int, float)):  # epoch millis/sec?
+    if isinstance(dt_val, (int, float)):
         if dt_val > 10**12:
             dt_val = dt_val / 1000.0
         try:
@@ -24,148 +22,212 @@ def _get(dt_val) -> str:
             return None
     if isinstance(dt_val, str):
         try:
-            # pretpostavi već UTC ISO
             return datetime.fromisoformat(dt_val.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
         except Exception:
             return dt_val
     return None
 
+from utils.logger import get_logger
+_mp_logger = get_logger(__name__)
+
 class MatchProcessor:
-    """
-    Prima listu enriched_event-ova i vraća 'bundle' spreman za DB sloj.
-    """
+    """Transforms enriched events into a bundle (entity lists) for storage."""
     def process(self, enriched_events: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """Main transformation entry point."""
         competitions: Dict[int, Dict[str, Any]] = {}
         teams: Dict[int, Dict[str, Any]] = {}
         players: Dict[int, Dict[str, Any]] = {}
-
         matches: List[Dict[str, Any]] = []
         lineups: List[Dict[str, Any]] = []
         formations: List[Dict[str, Any]] = []
         events: List[Dict[str, Any]] = []
-        # stats dodaje fetch_loop kroz StatsProcessor (enhance), ali možemo i ovdje ostaviti prazno
         player_stats: List[Dict[str, Any]] = []
         match_stats: List[Dict[str, Any]] = []
         shots: List[Dict[str, Any]] = []
         average_positions: List[Dict[str, Any]] = []
+        managers: List[Dict[str, Any]] = []
+        match_managers: List[Dict[str, Any]] = []
+        venue_ok_count = 0
+        venue_missing: List[int] = []
 
         for enriched in enriched_events:
-            base = enriched.get("event") or enriched  # fleksibilno
-            ev_id = int(enriched.get("event_id") or base.get("id"))
+            base = enriched.get("event") or enriched
+            eid_raw = enriched.get("event_id") or base.get("id")
+            try:
+                ev_id = int(eid_raw)
+            except Exception:
+                continue
 
-            # competition
+            # Venue debug
+            try:
+                raw_v = base.get("venue")
+                if raw_v is None:
+                    _mp_logger.debug(f"[match_processor][raw_venue_absent] ev={ev_id}")
+                elif isinstance(raw_v, dict):
+                    _mp_logger.debug(f"[match_processor][raw_venue_keys] ev={ev_id} keys={list(raw_v.keys())}")
+            except Exception:
+                pass
+
             comp = competition_processor.parse(base)
             if comp:
                 competitions[comp["sofascore_id"]] = comp
 
-            # teams
             for t in team_processor.parse_teams(base, enriched):
                 teams[t["sofascore_id"]] = t
-
-            # players & lineups & formations
             for p in team_processor.parse_players(enriched):
                 players[p["sofascore_id"]] = p
             lineups.extend(team_processor.parse_lineups(enriched))
             formations.extend(team_processor.parse_formations(enriched))
 
-            # events (incidents)
-            events.extend(events_processor.parse(enriched))
+            # Events (incidents)
+            event_rows = events_processor.parse(enriched)
+            events.extend(event_rows)
+            sub_in_ids = {er.get("player_in_sofascore_id") for er in event_rows if er.get("event_type") == "substitution" and er.get("player_in_sofascore_id")}
+            sub_out_ids = {er.get("player_out_sofascore_id") for er in event_rows if er.get("event_type") == "substitution" and er.get("player_out_sofascore_id")}
 
-            # status/scores
+            # Status & time
             stat = status_processor.parse(base)
-            # Derive status_type separately (raw description) for richer UI filtering
-            raw_status_desc = None
             try:
                 raw_status_desc = (base.get("status") or {}).get("description") or (base.get("status") or {}).get("type") or base.get("statusType")
             except Exception:
                 raw_status_desc = None
-
-            # osnovno polje datuma – SofaScore obično ima "startTimestamp" (epoch)
             date_utc = _get(base.get("startTimestamp") or base.get("startTimeUTC") or base.get("startTime"))
-
-            # Team colors for quick theming (fallback defaults)
             home_colors = (base.get("homeTeam") or {}).get("teamColors") or {}
             away_colors = (base.get("awayTeam") or {}).get("teamColors") or {}
             home_color = home_colors.get("primary") or "#222222"
             away_color = away_colors.get("primary") or "#222222"
-            # Current period start timestamp if exposed
             current_period_start = None
             try:
                 cps = (base.get("time") or {}).get("currentPeriodStartTimestamp")
                 if cps:
                     current_period_start = _get(cps)
             except Exception:
-                current_period_start = None
-
-            # Compose a match row ready for DB insertion.
+                pass
             is_finished = False
             try:
                 st_raw = (base.get("status") or {}).get("type") or (base.get("status") or {}).get("description") or stat.get("status")
                 if st_raw and str(st_raw).lower() in {"finished","afteret","aft","ft"}:
                     is_finished = True
             except Exception:
-                is_finished = False
-            match_row = {
+                pass
+            home_tid = enriched.get("home_team_sofa") or (base.get("homeTeam") or {}).get("id")
+            away_tid = enriched.get("away_team_sofa") or (base.get("awayTeam") or {}).get("id")
+
+            def _vn(v):
+                if isinstance(v, dict):
+                    return v.get("name") or (v.get("stadium") or {}).get("name") or v.get("slug")
+                return None
+            venue_name = _vn(base.get("venue")) or _vn((base.get("homeTeam") or {}).get("venue")) or _vn((base.get("awayTeam") or {}).get("venue"))
+            if not venue_name and home_tid in teams:
+                venue_name = teams[home_tid].get("venue")
+            if not venue_name and away_tid in teams:
+                venue_name = teams[away_tid].get("venue")
+            if venue_name:
+                venue_ok_count += 1
+            else:
+                venue_missing.append(ev_id)
+
+            comp_name = (comp or {}).get("name")
+            try:
+                if (stat.get("home_score") or 0) + (stat.get("away_score") or 0) > 15:
+                    from utils.logger import get_logger as _gl
+                    _gl(__name__).debug(
+                        f"[match_processor][score_anom] ev={ev_id} raw_homeScore={(base.get('homeScore') or {})} raw_awayScore={(base.get('awayScore') or {})}"
+                    )
+            except Exception:
+                pass
+
+            matches.append({
                 "source": "sofascore",
                 "source_event_id": ev_id,
                 "start_time": date_utc,
                 "status": stat["status"],
                 "home_team": (base.get("homeTeam") or {}).get("name"),
                 "away_team": (base.get("awayTeam") or {}).get("name"),
-                "home_team_sofascore_id": enriched.get("home_team_sofa") or (base.get("homeTeam") or {}).get("id"),
-                "away_team_sofascore_id": enriched.get("away_team_sofa") or (base.get("awayTeam") or {}).get("id"),
+                "home_team_sofascore_id": home_tid,
+                "away_team_sofascore_id": away_tid,
                 "home_score": stat.get("home_score"),
                 "away_score": stat.get("away_score"),
                 "home_score_ht": stat.get("home_score_ht"),
                 "away_score_ht": stat.get("away_score_ht"),
-                # Preserve a snapshot of final score if finished to prevent later overwrite by in‑play pollers
                 "final_home_score": stat.get("home_score") if is_finished else None,
                 "final_away_score": stat.get("away_score") if is_finished else None,
                 "competition_sofascore_id": (comp or {}).get("sofascore_id"),
+                "competition": comp_name,
                 "round": base.get("roundInfo", {}).get("round") if isinstance(base.get("roundInfo"), dict) else base.get("round"),
                 "season": (base.get("season") or {}).get("name") if isinstance(base.get("season"), dict) else base.get("season"),
-                "venue": (base.get("venue") or {}).get("name") if isinstance(base.get("venue"), dict) else None,
+                "venue": venue_name,
                 "status_type": raw_status_desc,
                 "home_color": home_color,
                 "away_color": away_color,
                 "current_period_start": current_period_start,
                 "is_finished": is_finished,
-            }
-            matches.append(match_row)
+            })
 
-            # Player stats from raw lineups (if statistics embedded)
+            # Player & match stats
             raw_lineups = enriched.get("_raw_lineups") or {}
-            try:
-                if raw_lineups:
-                    player_stats.extend(stats_processor.process_player_stats(raw_lineups, ev_id))
-            except Exception:
-                pass
-
-            # Match (team) stats
-            raw_stats = enriched.get("statistics") or {}
-            try:
-                if raw_stats:
+            if raw_lineups:
+                try:
+                    player_stats.extend(
+                        stats_processor.process_player_stats(
+                            raw_lineups,
+                            ev_id,
+                            subbed_in_ids=sub_in_ids,
+                            subbed_out_ids=sub_out_ids,
+                            team_id_map={"home": home_tid, "away": away_tid},
+                        )
+                    )
+                except Exception:
+                    pass
+            raw_stats = enriched.get("statistics") or enriched.get("_raw_statistics") or {}
+            if raw_stats:
+                try:
                     match_stats.extend(stats_processor.process_match_stats(raw_stats, ev_id))
-            except Exception:
-                pass
-
-            # Shots
+                except Exception:
+                    pass
             raw_shots = enriched.get("_raw_shots")
-            try:
-                if raw_shots:
+            if raw_shots:
+                try:
                     shots.extend(shots_processor.parse(raw_shots, ev_id))
-            except Exception:
-                pass
-
-            # Average positions
+                except Exception:
+                    pass
             raw_avg = enriched.get("_raw_avg_positions")
-            try:
-                if raw_avg:
+            if raw_avg:
+                try:
                     average_positions.extend(avg_positions_processor.parse(raw_avg, ev_id))
-            except Exception:
-                pass
+                except Exception:
+                    pass
+            raw_mgrs = enriched.get("managers") or {}
+            if isinstance(raw_mgrs, dict):
+                try:
+                    base_ev = enriched.get("event") or {}
+                    home_tid2 = (base_ev.get("homeTeam") or {}).get("id")
+                    away_tid2 = (base_ev.get("awayTeam") or {}).get("id")
+                    for side in ("home", "away"):
+                        m = raw_mgrs.get(side) or raw_mgrs.get(f"{side}Manager")
+                        if isinstance(m, dict) and m.get("id"):
+                            managers.append({
+                                "sofascore_id": m.get("id"),
+                                "full_name": m.get("name"),
+                                "team_sofascore_id": home_tid2 if side == "home" else away_tid2,
+                            })
+                            match_managers.append({
+                                "source_event_id": ev_id,
+                                "manager_sofascore_id": m.get("id"),
+                                "team_sofascore_id": home_tid2 if side == "home" else away_tid2,
+                                "side": side,
+                            })
+                except Exception:
+                    pass
 
-        bundle = {
+        try:
+            _mp_logger.info(
+                f"[match_processor][venue_summary] resolved={venue_ok_count} missing={len(venue_missing)} total={len(enriched_events)} missing_ids={venue_missing[:10]}"
+            )
+        except Exception:
+            pass
+
+        return {
             "competitions": list(competitions.values()),
             "teams": list(teams.values()),
             "players": list(players.values()),
@@ -177,5 +239,8 @@ class MatchProcessor:
             "match_stats": match_stats,
             "shots": shots,
             "average_positions": average_positions,
+            "managers": managers,
+            "match_managers": match_managers,
         }
-        return bundle
+
+match_processor = MatchProcessor()

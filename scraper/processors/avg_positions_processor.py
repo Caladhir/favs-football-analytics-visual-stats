@@ -34,6 +34,7 @@ class AveragePositionsProcessor:
                     "player_sofascore_id": pid,
                     "avg_x": ax,
                     "avg_y": ay,
+                    "side": side,
                 })
         return out
 

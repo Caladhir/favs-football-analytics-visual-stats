@@ -75,27 +75,95 @@ class StandingsProcessor:
                     continue
 
             rank    = r.get("position") or r.get("rank") or stats.get("position")
-            played  = stats.get("matches") or stats.get("played") or (stats.get("wins") and stats.get("draws") and stats.get("losses") and (stats["wins"]+stats["draws"]+stats["losses"]))
+            played  = stats.get("matches") or stats.get("played") or (
+                (stats.get("wins") is not None and stats.get("draws") is not None and stats.get("losses") is not None) and (stats.get("wins")+stats.get("draws")+stats.get("losses"))
+            )
             wins    = stats.get("wins") or stats.get("w")
             draws   = stats.get("draws") or stats.get("d")
             losses  = stats.get("losses") or stats.get("l")
-            gf      = stats.get("goalsFor") or stats.get("gf") or (stats.get("scored"))
-            ga      = stats.get("goalsAgainst") or stats.get("ga") or (stats.get("conceded"))
+            # Goals for / against (wider key coverage: scoresFor/scoresAgainst)
+            gf      = (stats.get("goalsFor") or stats.get("gf") or stats.get("scored") or stats.get("scoresFor"))
+            ga      = (stats.get("goalsAgainst") or stats.get("ga") or stats.get("conceded") or stats.get("scoresAgainst"))
             points  = stats.get("points") or stats.get("pts")
             form    = r.get("form") or stats.get("form")
+
+            # Normalise numeric types early
+            rank   = self._as_int(rank)
+            played = self._as_int(played)
+            wins   = self._as_int(wins)
+            draws  = self._as_int(draws)
+            losses = self._as_int(losses)
+            gf     = self._as_int(gf)
+            ga     = self._as_int(ga)
+            points = self._as_int(points)
+
+            # Treat missing basic counts as 0 placeholders (some feeds omit zeros)
+            # Defer points until after reconstruction
+            zero_if_missing = played is not None
+            if zero_if_missing:
+                if wins is None: wins = 0
+                if draws is None: draws = 0
+                if losses is None: losses = 0
+                if gf is None: gf = 0
+                if ga is None: ga = 0
+
+            # --- Reconstruction logic ---
+            # Use equations:
+            # 1) wins + draws + losses = played
+            # 2) 3*wins + draws = points
+            # Derive missing fields where possible.
+            if played is not None:
+                # Derive using points when available
+                if points is not None:
+                    if wins is not None and draws is None:
+                        cand = points - 3*wins
+                        if cand >= 0:
+                            draws = cand
+                    if wins is None and draws is not None:
+                        # wins = (points - draws)/3 if divisible
+                        diff = points - draws
+                        if diff >= 0 and diff % 3 == 0:
+                            wins = diff // 3
+                    if wins is None and draws is None and losses is not None:
+                        # From equations: wins = (points - (played - losses)) / 2
+                        diff = points - (played - losses)
+                        if diff >= 0 and diff % 2 == 0:
+                            wins = diff // 2
+                            draws = played - losses - wins
+                    if wins is not None and draws is not None and points is None:
+                        points = wins*3 + draws
+                # Use played total to backfill single missing component
+                known = [x is not None for x in (wins, draws, losses)].count(True)
+                if known >= 2:
+                    if wins is None:
+                        wins = played - (draws or 0) - (losses or 0)
+                    if draws is None:
+                        draws = played - (wins or 0) - (losses or 0)
+                    if losses is None:
+                        losses = played - (wins or 0) - (draws or 0)
+            # Final guard: ensure non-negative and realistic
+            for name, val in ("wins", wins), ("draws", draws), ("losses", losses):
+                if val is not None and val < 0:
+                    if name == "wins": wins = 0
+                    if name == "draws": draws = 0
+                    if name == "losses": losses = 0
+            if points is None and wins is not None and draws is not None and wins >= 0 and draws >= 0:
+                points = wins*3 + draws
+            if points is None and zero_if_missing:
+                points = 0
 
             out.append({
                 "competition_sofascore_id": int(comp_sofa_id),
                 "season": season_str,
                 "team_sofascore_id": int(team_sofa),
-                "rank": self._as_int(rank),
-                "played": self._as_int(played),
-                "wins": self._as_int(wins),
-                "draws": self._as_int(draws),
-                "losses": self._as_int(losses),
-                "goals_for": self._as_int(gf),
-                "goals_against": self._as_int(ga),
-                "points": self._as_int(points),
+                "rank": rank,
+                "played": played,
+                "wins": wins,
+                "draws": draws,
+                "losses": losses,
+                "goals_for": gf,
+                "goals_against": ga,
+                "points": points,
                 "form": self._stringify_form(form),
             })
 

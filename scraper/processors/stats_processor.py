@@ -1,19 +1,62 @@
 # scraper/processors/stats_processor.py
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
+import os
+from utils.logger import get_logger
+_sp_logger = get_logger(__name__)
 
-def _to_int(x) -> Optional[int]:
+# ==== helperi (dodaj u stats_processor.py ili gdje ti je zgodno) ====
+def _to_int(x):
     try:
-        return int(x)
+        if x is None or x == '':
+            return None
+        return int(round(float(x)))
     except Exception:
         return None
 
-class StatsProcessor:
-    """Enhanced SofaScore stats parser (match + player).
+def _to_float(x):
+    try:
+        if x is None or x == '':
+            return None
+        return float(x)
+    except Exception:
+        return None
 
-    Adds robust player stat synonyms: shots_total, shots_on_target, touches,
-    yellow_cards, red_cards besides legacy fields. Keeps backward
-    compatible 'shots' alias.
+def extract_player_stats_from_sofa(stat: dict) -> dict:
+    """Vrati dict s *isključivo* stupcima koji postoje u public.player_stats."""
+    # Rating: always prefer ratingVersions.original (what UI shows). Fallbacks: explicit rating field, then alternative.
+    rv = stat.get("ratingVersions") or {}
+    rating = _to_float(rv.get("original"))
+    if rating is None:  # some older events may only have 'rating'
+        rating = _to_float(stat.get("rating"))
+    if rating is None:  # last resort: alternative version
+        rating = _to_float(rv.get("alternative"))
+
+    return {
+        # redoslijed nije bitan, ali držimo isti naziv kao u bazi:
+        "goals":            _to_int(stat.get("goals")),  # često ga nema u ovom endpointu
+        "assists":          _to_int(stat.get("goalAssist") or stat.get("assists")),
+        "passes":           _to_int(stat.get("totalPass") or stat.get("totalPasses") or stat.get("passesTotal") or stat.get("passes")),
+        "tackles":          _to_int(stat.get("totalTackle") or stat.get("totalTackles") or stat.get("tackles")),
+        "shots_total":      _to_int(stat.get("totalScoringAttempt") or stat.get("scoringAttempt") or stat.get("shotsTotal") or stat.get("totalShots") or stat.get("shots")),
+        "shots_on_target":  _to_int(stat.get("onTargetScoringAttempt") or stat.get("shotsOnTarget") or stat.get("onTargetShots")),
+        "minutes_played":   _to_int(stat.get("minutesPlayed") or stat.get("minutes")),
+        "touches":          _to_int(stat.get("touches") or stat.get("ballTouches") or stat.get("touchesCount") or stat.get("totalTouches")),
+        "rating":           rating,
+        # is_substitute/was_subbed_in/was_subbed_out popuni iz subs/lineups procesora (ne iz ovog endpointa)
+    }
+
+class StatsProcessor:
+    """SofaScore stats parser (match + player).
+
+    NOTE (simplified per user request): Player stat extraction rolled back to a
+    minimal, direct mapping that ONLY pulls columns that exist in public.player_stats
+    and uses the exact SofaScore per-player endpoint keys (e.g. totalPass, totalTackle,
+    onTargetScoringAttempt, minutesPlayed, touches, rating / ratingVersions.original).
+    We update a player's row ONLY with non-None values to avoid overwriting previously
+    computed data with nulls. Fallback logic for shots_total (sum of onTarget + blocked + off/shotOff)
+    is included so we get a value even if no aggregate key exists. Substitution flags &
+    bench handling logic from previous version are retained.
     """
 
     # Mapping of normalised statistic names to our canonical field names
@@ -48,13 +91,13 @@ class StatsProcessor:
         "passes": "passes",
         "passess": "passes",
         "passesaccurate": "pass_accuracy",
+    "accuratepasses": "accurate_passes",  # intermediate key (we'll transform to pass_accuracy % later)
         "passaccuracy": "pass_accuracy",
         "passsuccessrate": "pass_accuracy",
         "passaccuracy%": "pass_accuracy",
         "xg": "xg",
         "expectedgoals": "xg",
-        "xa": "xa",
-        "expectedassists": "xa",
+    # Removed XA (expected assists) per requirement – not captured in match_stats now
         "saves": "saves",
         "goalkeepersaves": "saves",
         "goalkeepersave": "saves",
@@ -80,26 +123,68 @@ class StatsProcessor:
     def process_match_stats(self, raw: Dict[str, Any], event_id: int) -> List[Dict[str, Any]]:
         """Parse team‑level match statistics into DB‑friendly rows."""
         out: List[Dict[str, Any]] = []
-        groups = raw.get("statistics") or raw.get("statisticsItems") or raw.get("groups") or []
-        # Normalise groups into a list of items
-        if isinstance(groups, dict):
-            groups = [groups]
-        # Accumulate metrics per side
+        # SofaScore current structure: { statistics: [ { period: "ALL", groups: [ { statisticsItems: [...] } ] }, ... ] }
+        periods = raw.get("statistics") or []
+        # Backwards compatibility: if raw itself is the list of groups
+        if isinstance(periods, list) and periods and all("groupName" in p or "statisticsItems" in p for p in periods):
+            # Treat list directly as groups (legacy)
+            target_groups = periods
+        else:
+            target = None
+            if isinstance(periods, list):
+                for p in periods:
+                    if isinstance(p, dict) and str(p.get("period")).upper() == "ALL":
+                        target = p
+                        break
+                if not target and periods:
+                    target = periods[0]
+            elif isinstance(periods, dict):  # rare edge
+                target = periods
+            if target and isinstance(target, dict):
+                target_groups = target.get("groups") or []
+            else:
+                target_groups = []
+        # Accumulate metrics per side (working store); also keep raw accurate passes for later percentage calc
         team_stats: Dict[str, Dict[str, Any]] = {"home": {}, "away": {}}
-        for g in groups:
+        raw_accurate: Dict[str, Dict[str, float]] = {"home": {}, "away": {}}
+        for g in target_groups:
             items = g.get("statisticsItems") or g.get("items") or []
             for it in items:
-                # Determine metric key
-                metric = it.get("name") or it.get("title") or it.get("type") or ""
+                metric = it.get("name") or it.get("title") or it.get("type") or it.get("key") or ""
                 key = str(metric).strip().lower().replace(" ", "").replace("_", "")
                 canonical = self._STAT_KEYS_MAP.get(key)
                 if not canonical:
                     continue
-                # Extract values for home/away.  SofaScore sometimes nests values under 'value'.
                 home_v = it.get("home") if "home" in it else it.get("value", {}).get("home")
                 away_v = it.get("away") if "away" in it else it.get("value", {}).get("away")
-                team_stats["home"][canonical] = self._parse_value(home_v)
-                team_stats["away"][canonical] = self._parse_value(away_v)
+                hv = self._parse_value(home_v)
+                av = self._parse_value(away_v)
+                if canonical == "accurate_passes":
+                    if hv is not None:
+                        raw_accurate["home"]["accurate_passes"] = hv
+                    if av is not None:
+                        raw_accurate["away"]["accurate_passes"] = av
+                    continue  # we will convert later
+                team_stats["home"][canonical] = hv
+                team_stats["away"][canonical] = av
+        # Derive pass_accuracy (%) if missing but we have passes + accurate_passes
+        for side in ("home","away"):
+            if "pass_accuracy" not in team_stats[side]:
+                acc = raw_accurate[side].get("accurate_passes")
+                total = team_stats[side].get("passes")
+                if acc is not None and total and total > 0:
+                    team_stats[side]["pass_accuracy"] = round(100.0 * acc / total)
+            # Ensure red_cards defaults to 0 (and optionally yellow_cards) when statistic absent
+            if "red_cards" not in team_stats[side]:
+                team_stats[side]["red_cards"] = 0
+            if "yellow_cards" not in team_stats[side]:
+                team_stats[side]["yellow_cards"] = 0
+            # Also default core numeric counters to 0 if any stats parsed at all
+            core_ints = ["possession","shots_total","shots_on_target","corners","fouls","offsides","passes","saves"]
+            if any(team_stats[side].values()):
+                for k in core_ints:
+                    if k not in team_stats[side]:
+                        team_stats[side][k] = 0
         # Create one row per team side
         for side in ("home", "away"):
             row: Dict[str, Any] = {
@@ -111,28 +196,27 @@ class StatsProcessor:
             out.append(row)
         return out
 
-    def process_player_stats(self, raw: Dict[str, Any], event_id: int) -> List[Dict[str, Any]]:
+    def process_player_stats(
+        self,
+        raw: Dict[str, Any],
+        event_id: int,
+        subbed_in_ids: Optional[set] = None,
+        subbed_out_ids: Optional[set] = None,
+        team_id_map: Optional[Dict[str, int]] = None,
+    ) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         teams: List[Tuple[str, Any]] = []
         if "home" in raw or "away" in raw:
             teams = [("home", raw.get("home")), ("away", raw.get("away"))]
-        elif "players" in raw:
+        elif "players" in raw:  # legacy structure fallback
             teams = [("home", raw), ("away", raw)]
-        syn = {
-            "minutes_played": ["minutesplayed", "minutes", "playedminutes"],
-            "shots_total": ["totalshots", "shotstotal", "shots"],
-            "shots_on_target": ["shotsontarget", "ontargetshots", "shotsongoal"],
-            "touches": ["touches", "balltouches", "totaltouches"],
-            "yellow_cards": ["yellowcards", "yellow"],
-            "red_cards": ["redcards", "red"],
-            "passes": ["totalpasses", "passes", "passestotal"],
-            "tackles": ["tackles", "tackleswon"],
-        }
-        def _pull(stats: Dict[str, Any], canonical: str):
-            for k in [canonical] + syn.get(canonical, []):
-                if k in stats and stats[k] not in (None, ""):
-                    return stats[k]
+
+        def _first(d: Dict[str, Any], *keys):
+            for k in keys:
+                if k in d and d[k] not in (None, ""):
+                    return d[k]
             return None
+
         for side, node in teams:
             if not node:
                 continue
@@ -142,48 +226,124 @@ class StatsProcessor:
                 if not pid:
                     continue
                 stats = p.get("statistics") or p.get("stats") or {}
-                norm: Dict[str, Any] = {}
-                for k, v in stats.items():
-                    if isinstance(k, str):
-                        norm[k.strip().lower().replace(" ", "").replace("_", "")] = v
-                minutes_played = _to_int(_pull(norm, "minutes_played"))
-                # Fallback: ONLY if minutes is missing (None) and player marked as starter, assume 90.
-                # If it's explicitly 0 we keep 0 (means no minutes / DNP in your workflow).
-                if minutes_played is None and (p.get("isStarting") or p.get("starting")):
-                    minutes_played = 90
-                shots_total = _to_int(_pull(norm, "shots_total"))
-                shots_on_target = _to_int(_pull(norm, "shots_on_target"))
-                touches = _to_int(_pull(norm, "touches"))
-                # Rating variants (some payloads use ratingNum / playerRating)
-                raw_rating = stats.get("rating") or stats.get("ratingNum") or stats.get("playerRating")
-                try:
-                    rating_val = float(raw_rating) if raw_rating not in (None, "") else None
-                except Exception:
-                    rating_val = None
+                if not stats and isinstance(pl.get("statistics"), dict):
+                    stats = pl.get("statistics")
+
+                # Use unified helper for extraction
+                extracted = extract_player_stats_from_sofa(stats)
+                # Fallback sum for shots_total if helper returned None
+                if extracted.get("shots_total") is None:
+                    comp_vals = []
+                    for k in ("onTargetScoringAttempt", "offTargetScoringAttempt", "shotOffTarget", "shotsOffTarget", "blockedScoringAttempt"):
+                        v = _to_int(stats.get(k))
+                        if v is not None:
+                            comp_vals.append(v)
+                    if comp_vals:
+                        extracted["shots_total"] = sum(comp_vals)
+
                 rec: Dict[str, Any] = {
                     "source": "sofascore",
                     "source_event_id": int(event_id),
                     "team": side,
                     "player_sofascore_id": pid,
-                    "minutes_played": minutes_played,
-                    "rating": rating_val,
-                    "goals": _to_int(stats.get("goals")),
-                    "assists": _to_int(stats.get("assists")),
-                    "shots_total": shots_total,
-                    "shots_on_target": shots_on_target,
-                    "passes": _to_int(_pull(norm, "passes")),
-                    "tackles": _to_int(_pull(norm, "tackles")),
-                    "yellow_cards": _to_int(_pull(norm, "yellow_cards")),
-                    "red_cards": _to_int(_pull(norm, "red_cards")),
-                    "touches": touches,
                 }
-                is_sub = p.get("isSubstitute") or p.get("substitute")
-                if is_sub is not None:
-                    rec["is_substitute"] = bool(is_sub)
-                if stats.get("subbedIn") or stats.get("wasSubbedIn") or p.get("subbedInTime"):
+                # Only set non-None values to avoid wiping prior data
+                for k, v in extracted.items():
+                    if v is not None:
+                        rec[k] = v
+
+                # Substitution heuristics (kept)
+                is_starting = bool(p.get("isStarting") or p.get("starting"))
+                sub_in_time = p.get("subbedInTime") or stats.get("subbedInTime")
+                sub_out_time = p.get("subbedOutTime") or stats.get("subbedOutTime")
+                explicit_is_sub = p.get("isSubstitute") or p.get("substitute")
+                # Minutes: we now fully trust SofaScore minutesPlayed; no recalculation or inference.
+                minutes_played_current = rec.get("minutes_played")
+
+                # is_substitute flag: prefer explicit; else infer from is_starting
+                if explicit_is_sub is not None:
+                    rec["is_substitute"] = bool(explicit_is_sub)
+                else:
+                    if is_starting:
+                        rec["is_substitute"] = False
+                    elif minutes_played_current is not None:
+                        # if not starting and has minutes >0 it's a sub, else will be handled in bench section
+                        rec["is_substitute"] = True
+
+                if sub_in_time is not None:
                     rec["was_subbed_in"] = True
-                if stats.get("subbedOut") or stats.get("wasSubbedOut") or p.get("subbedOutTime"):
+                if sub_out_time is not None:
                     rec["was_subbed_out"] = True
+
+                if subbed_in_ids and pid in subbed_in_ids:
+                    rec["was_subbed_in"] = True
+                    if rec.get("is_substitute") is False and not is_starting:
+                        rec["is_substitute"] = True
+                if subbed_out_ids and pid in subbed_out_ids:
+                    rec["was_subbed_out"] = True
+
+                # If player has minutes (participated) ensure missing count stats become 0 (avoid NULL overwrites later)
+                if rec.get("minutes_played") is not None and rec.get("minutes_played") > 0:
+                    for k in ("goals","assists","passes","tackles","shots_total","shots_on_target","touches"):
+                        if rec.get(k) is None:
+                            rec[k] = 0
+
+                # --- Anomaly detection & correction ---
+                try:
+                    mp = rec.get("minutes_played")
+                    if isinstance(mp, (int, float)) and mp and mp > 120:
+                        # Only log; do NOT modify (store what API returns)
+                        _sp_logger.warning(f"[player_stats_anom] ev={event_id} pid={pid} minutes_played={mp} >120 (raw_keys={list(stats.keys())})")
+                    # Passes should rarely exceed 120; touches rarely > 150; passes cannot exceed touches normally
+                    ps = rec.get("passes")
+                    tc = rec.get("touches")
+                    if (isinstance(ps, int) and ps > 120) or (isinstance(tc, int) and tc > 180) or (isinstance(ps, int) and isinstance(tc, int) and ps > tc and tc > 0):
+                        _sp_logger.warning(
+                            f"[player_stats_anom] ev={event_id} pid={pid} passes={ps} touches={tc} minutes={rec.get('minutes_played')} raw_stats_subset={ {k: stats.get(k) for k in ['totalPass','accuratePass','touches','minutesPlayed']} }"
+                        )
+                    # Optional full raw dump for first N players if env set
+                    dump_n = int(os.getenv("LOG_PLAYER_STATS_RAW_FIRST_N", "0") or 0)
+                    if dump_n > 0:
+                        # Use deterministic ordering by appending raw until counter reaches N per event
+                        key = f"_dump_count_{event_id}"
+                        already = getattr(self, key, 0)
+                        if already < dump_n:
+                            _sp_logger.info(f"[player_stats_raw] ev={event_id} pid={pid} raw_keys={list(stats.keys())} raw={ {k: stats.get(k) for k in stats.keys()} }")
+                            setattr(self, key, already + 1)
+                except Exception:
+                    pass
+
+                # Bench unused: assign 0 minutes + zeros if truly unused
+                if rec.get("minutes_played") is None and not is_starting and not rec.get("was_subbed_in"):
+                    rec["minutes_played"] = 0
+                    rec["is_substitute"] = True if rec.get("is_substitute") is not False else rec.get("is_substitute")
+                    for k in ("goals","assists","shots_total","shots_on_target","passes","tackles","touches"):
+                        if rec.get(k) is None:
+                            rec[k] = 0
+
+                # Team id mapping passthrough
+                try:
+                    if team_id_map and side in team_id_map and team_id_map[side] is not None:
+                        rec["team_sofascore_id"] = int(team_id_map[side])
+                except Exception:
+                    pass
+
+                # Configurable log level for per-player line (default DEBUG, can elevate to INFO via env)
+                try:
+                    lvl = os.getenv("LOG_PLAYER_STATS_LEVEL", "DEBUG").upper()
+                    msg = (
+                        f"[player_stats_parse] ev={event_id} pid={pid} side={side} rating={rec.get('rating')} min={rec.get('minutes_played')} "
+                        f"touches={rec.get('touches')} passes={rec.get('passes')} tackles={rec.get('tackles')} goals={rec.get('goals')} "
+                        f"assists={rec.get('assists')} was_in={rec.get('was_subbed_in')} was_out={rec.get('was_subbed_out')} is_sub={rec.get('is_substitute')}"
+                    )
+                    if lvl == "INFO":
+                        _sp_logger.info(msg)
+                    elif lvl == "WARNING":
+                        _sp_logger.warning(msg)
+                    else:
+                        _sp_logger.debug(msg)
+                except Exception:
+                    pass
                 out.append(rec)
         return out
 

@@ -7,43 +7,33 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 class EventsProcessor:
-    """Convert incidents or enriched 'events' into rows for the match_events table.
+    """Parse SofaScore incidents into normalized match_events rows.
 
-    SofaScore exposes a variety of event types (e.g. 'penalty_goal',
-    'substitution_in') that are not directly accepted by our database.  This
-    processor normalises those values down to a small, allowed set.
+    Improvements vs. previous version:
+        * Uses incidentType / incidentClass (SofaScore current schema) not just 'type'.
+        * Proper minute derivation: time + addedTime (if small); avoids synthetic 1000+ minutes.
+        * Richer event_type mapping (cards, goals, substitutions, VAR, injury, period filtered).
+        * Better player name extraction (player / playerIn / playerOut fallback).
+        * Description from reason / incidentClass / goalType.
     """
 
-    # Mapping from raw event types to the DB‑accepted categories.  Any type
-    # not found in this map will be stored under the generic category 'event'.
     _EVENT_TYPE_MAP = {
+        # Goals
         "goal": "goal",
         "own_goal": "own_goal",
-        "penalty": "penalty",
-        "penalty_goal": "penalty",
-        "penalty_miss": "penalty",
-        "yellow_card": "yellow_card",
+        # Cards
         "yellow": "yellow_card",
-        "booking": "yellow_card",
-        "booked": "yellow_card",
-        "red_card": "red_card",
+        "card": "yellow_card",  # default yellow unless class says red
         "red": "red_card",
-        "straight_red": "red_card",
-        "second_yellow": "red_card",
+        "secondyellow": "red_card",
+        # Subs
         "substitution": "substitution",
-        "substitution_in": "substitution",
-        "substitution_out": "substitution",
-        "sub": "substitution",
+        # VAR
+        "vardecision": "var",
         "var": "var",
-        "corner": "corner",
-        "corner_kick": "corner",
+        # Other explicit
         "offside": "offside",
-        # Other temporal or generic events default to 'event'
-        "kickoff": "event",
-        "half_time": "event",
-        "full_time": "event",
-        "period_start": "event",
-        "period_end": "event",
+        "corner": "corner",
     }
 
     def parse(self, enriched: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -70,127 +60,101 @@ class EventsProcessor:
         away_team_obj = base.get("awayTeam") or {}
         home_tid = home_team_obj.get("id")
         away_tid = away_team_obj.get("id")
-        raw_incidents = enriched.get("events") or []
+        raw_incidents = enriched.get("incidents") or enriched.get("events") or []
         unknown_min_samples: List[Dict[str, Any]] = []
         for idx, inc in enumerate(raw_incidents):
-            # Determine the canonical event_type.  Lower‑case, strip spaces and
-            # underscores, then look up in the mapping.  Unknowns default to 'event'.
-            raw_type = inc.get("type") or ""
-            key = str(raw_type).strip().lower().replace(" ", "_").replace("__", "_")
-            etype = self._EVENT_TYPE_MAP.get(key, "event")
-            # Minute fallback: if missing, default to -1 so we can persist the row
-            # --- Minute extraction (robust) ---
+            raw_type = inc.get("incidentType") or inc.get("type") or inc.get("eventType") or ""
+            raw_class = inc.get("incidentClass") or inc.get("class") or ""
+            key = str(raw_type).lower().replace(" ","")
+            etype = self._EVENT_TYPE_MAP.get(key, None)
+            # Card refinement
+            if key in ("card", "yellow", "red") or raw_type == "card":
+                ckey = str(raw_class).lower()
+                if "red" in ckey:
+                    etype = "red_card"
+                elif "yellow" in ckey:
+                    etype = "yellow_card"
+            if raw_type == "substitution":
+                etype = "substitution"
+            if raw_type.startswith("goal") or raw_type == "goal":
+                etype = etype or "goal"
+            if raw_type in ("varDecision", "var"):
+                etype = "var"
+            if not etype:
+                # skip pure period / injuryTime noise
+                noise = {"period", "injurytime"}
+                if key in noise:
+                    continue
+                etype = "event"
+            # Minute derivation
             minute = None
-            # direct fields
-            for k in ("minute", "minutes", "timeMin", "timeMinute"):
-                if inc.get(k) is not None:
-                    try:
-                        minute = int(inc.get(k))
-                        break
-                    except Exception:
-                        pass
-            # nested time object
+            base_min = inc.get("time")
+            if base_min is not None:
+                try:
+                    minute = int(base_min)
+                except Exception:
+                    minute = None
+            add = inc.get("addedTime") or inc.get("addMinutes") or inc.get("addedMinutes")
+            try:
+                if minute is not None and add is not None:
+                    add_int = int(add)
+                    # Ignore bogus 999 placeholders
+                    if 0 < add_int < 30:
+                        minute += add_int
+            except Exception:
+                pass
             if minute is None:
-                t = inc.get("time")
-                if isinstance(t, dict):
-                    for k in ("minute", "minutes", "regular", "current"):
-                        if t.get(k) is not None:
-                            try:
-                                minute = int(t.get(k))
-                                break
-                            except Exception:
-                                pass
-                    # add stoppage/additional minutes
-                    if minute is not None:
-                        for add_k in ("addMinutes", "addedMinutes", "added", "stoppageTime", "injuryTime"):
-                            add_v = t.get(add_k)
-                            if add_v not in (None, ""):
-                                try:
-                                    minute += int(add_v)
-                                except Exception:
-                                    pass
-            # textual pattern e.g. '45+2'
-            if minute is None:
-                for k in ("text", "clock", "timeText"):
+                # textual pattern (rare now)
+                for k in ("text","clock"):
                     txt = inc.get(k)
-                    if isinstance(txt, str):
+                    if isinstance(txt,str):
                         m = re.search(r"(\d+)(?:\+(\d+))?", txt)
                         if m:
                             try:
-                                base = int(m.group(1))
-                                extra = int(m.group(2)) if m.group(2) else 0
-                                minute = base + extra
+                                minute = int(m.group(1)) + (int(m.group(2)) if m.group(2) else 0)
                                 break
                             except Exception:
                                 pass
-            # fallback
             if minute is None:
                 minute = -1
                 if len(unknown_min_samples) < 5:
                     unknown_min_samples.append({"type": etype, "raw_type": raw_type, "keys": list(inc.keys())[:8]})
-            # Player name fallback: try alternative fields, else a safe placeholder
-            pname = inc.get("player_name")
+            # Player name
+            pname = None
+            # substitution: prefer playerIn, else player, else playerOut
+            if raw_type == "substitution":
+                for pk in ("playerIn","player","playerOut"):
+                    pobj = inc.get(pk)
+                    if isinstance(pobj, dict) and pobj.get("name"):
+                        pname = pobj.get("name")
+                        break
+            else:
+                pobj = inc.get("player") or {}
+                pname = pobj.get("name") or inc.get("playerName")
             if not pname:
-                # sometimes raw incident may include nested objects or alternative keys
-                p = inc.get("player") or {}
-                pname = p.get("name") or inc.get("playerName") or "Unknown"
-            # Team side inference: Sofascore incidents are inconsistent.
-            team_side = inc.get("team")
+                pname = "Unknown"
+            # Team side from isHome boolean
+            team_side = None
+            if isinstance(inc.get("isHome"), bool):
+                team_side = "home" if inc.get("isHome") else "away"
             if not team_side:
-                # isHome boolean
-                if isinstance(inc.get("isHome"), bool):
-                    team_side = "home" if inc.get("isHome") else "away"
-                else:
-                    # team object with id
-                    t_obj = inc.get("team")
-                    if isinstance(t_obj, dict):
-                        tid = t_obj.get("id")
-                        if tid == home_tid:
-                            team_side = "home"
-                        elif tid == away_tid:
-                            team_side = "away"
-                    # explicit teamId / team_id
-                    if not team_side:
-                        tid2 = inc.get("teamId") or inc.get("team_id")
-                        if tid2 == home_tid:
-                            team_side = "home"
-                        elif tid2 == away_tid:
-                            team_side = "away"
+                # fallback using player team ids if present
+                tid2 = inc.get("teamId") or inc.get("team_id")
+                if tid2 == home_tid:
+                    team_side = "home"
+                elif tid2 == away_tid:
+                    team_side = "away"
             if not team_side:
-                # Last resort: skip if absolutely no way to infer; log small sample.
-                logger.debug(f"[events_processor] Skipping incident without team side ev={ev_id} type={etype} raw_keys={list(inc.keys())[:6]}")
+                # If still unknown, skip (avoid polluting)
                 continue
-            # Additional participant context (for substitutions/goals/cards)
-            primary_player_id = None
-            assist_player_id = None
-            out_player_id = None
-            in_player_id = None
-            try:
-                p_obj = inc.get("player") or {}
-                primary_player_id = p_obj.get("id")
-            except Exception:
-                primary_player_id = None
-            # Goal assist patterns
-            a_obj = inc.get("assist") or inc.get("secondaryPlayer") or {}
-            if isinstance(a_obj, dict):
-                assist_player_id = a_obj.get("id")
-            # Substitution specific: some feeds provide substitution object / relatedEvent
-            if etype == "substitution":
-                # Common structures: {playerIn, playerOut} or {player, relatedPlayer}
-                pin = inc.get("playerIn") or inc.get("player_in") or inc.get("playerInPlayer")
-                pout = inc.get("playerOut") or inc.get("player_out") or inc.get("playerOutPlayer")
-                if pin and isinstance(pin, dict):
-                    in_player_id = pin.get("id")
-                if pout and isinstance(pout, dict):
-                    out_player_id = pout.get("id")
-                # fallback to player/relatedPlayer naming
-                if not in_player_id and inc.get("player") and inc.get("relatedPlayer"):
-                    # heuristics: player is coming in if has minutes=0? We just store both for post-processing
-                    try:
-                        in_player_id = inc.get("player", {}).get("id")
-                        out_player_id = inc.get("relatedPlayer", {}).get("id")
-                    except Exception:
-                        pass
+            # Assist (goal incidents may have assist1)
+            assist_obj = inc.get("assist1") or inc.get("assist") or inc.get("secondaryPlayer") or {}
+            assist_id = assist_obj.get("id") if isinstance(assist_obj, dict) else None
+            primary_player_id = (inc.get("player") or {}).get("id") if isinstance(inc.get("player"), dict) else None
+            in_id = (inc.get("playerIn") or {}).get("id") if isinstance(inc.get("playerIn"), dict) else None
+            out_id = (inc.get("playerOut") or {}).get("id") if isinstance(inc.get("playerOut"), dict) else None
+            # Description preference
+            desc = inc.get("reason") or inc.get("text") or raw_class or raw_type
             rows.append({
                 "source": "sofascore",
                 "source_event_id": ev_id,
@@ -199,11 +163,10 @@ class EventsProcessor:
                 "team": team_side,
                 "player_name": pname,
                 "player_sofascore_id": primary_player_id,
-                "assist_player_sofascore_id": assist_player_id,
-                "player_in_sofascore_id": in_player_id,
-                "player_out_sofascore_id": out_player_id,
-                # Description fallback: prefer explicit description/text, fallback to raw type.
-                "description": inc.get("description") or inc.get("text") or inc.get("detail") or raw_type,
+                "assist_player_sofascore_id": assist_id,
+                "player_in_sofascore_id": in_id,
+                "player_out_sofascore_id": out_id,
+                "description": desc,
             })
         # Log if we failed to resolve most minutes for this match
         if rows:
@@ -213,13 +176,7 @@ class EventsProcessor:
                     f"[events_processor] ev={ev_id} unknown_minutes={unknown_cnt}/{len(rows)} samples={unknown_min_samples}"
                 )
             # If many -1 minutes, spread them deterministically to avoid all colliding (minute, event_type, team, player_name)
-            if unknown_cnt > 0:
-                seq = 0
-                for r in rows:
-                    if r.get("minute", -1) < 0:
-                        # Map to pseudo-minute bucket 1000+seq (unlikely to clash with real minutes <130)
-                        r["minute"] = 1000 + seq
-                        seq += 1
+            # We no longer remap -1 minutes to 1000+; leave as -1 for clarity
         return rows
 
 events_processor = EventsProcessor()

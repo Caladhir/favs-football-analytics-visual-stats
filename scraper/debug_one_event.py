@@ -219,7 +219,6 @@ STAT_KEYS = {
     "passes": ("passes", None),
     "accurate passes": ("_accurate_passes", None),
     "xg": ("xg", "float"),
-    "xa": ("xa", "float"),
     "saves": ("saves", None),
 }
 
@@ -1991,7 +1990,7 @@ def main():
             "fouls": s.get("fouls"), "offsides": s.get("offsides"),
             "yellow_cards": s.get("yellow_cards"), "red_cards": s.get("red_cards"),
             "passes": s.get("passes"), "pass_accuracy": s.get("pass_accuracy"),
-            "xg": s.get("xg"), "xa": s.get("xa"), "saves": s.get("saves"),
+            "xg": s.get("xg"), "saves": s.get("saves"),
             "updated_at": s.get("updated_at") or datetime.now(timezone.utc).isoformat(),
         })
     ok, fail = db.upsert_match_stats(mstats); logger.info(f"✅ match_stats:   ok={ok} fail={fail}")

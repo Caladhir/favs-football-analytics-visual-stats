@@ -57,6 +57,16 @@ def dedupe_matches(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                         chosen["final_away_score"] = cand.get("final_away_score")
             except Exception:
                 pass
+        # Preserve venue if one candidate has it and the chosen one lacks it
+        try:
+            if not chosen.get("venue"):
+                for cand in (a, b):
+                    v = cand.get("venue")
+                    if v:
+                        chosen["venue"] = v
+                        break
+        except Exception:
+            pass
         return chosen
 
     by_src: Dict[Tuple[str, int], Dict[str, Any]] = {}
@@ -94,7 +104,7 @@ _ALLOWED = {
     },
     "players": {
     "full_name","position","number","team_id","nationality","age",
-    "height_cm","sofascore_id",
+    "height_cm","sofascore_id","date_of_birth",
     },
     "managers": {
     "full_name","nationality","date_of_birth","team_id","sofascore_id",
@@ -111,22 +121,21 @@ _ALLOWED = {
     "formations": {"match_id","team_id","formation"},
     "match_events": {"match_id","minute","event_type","player_name","team","description"},
     "player_stats": {
-        "match_id","player_id","team_id",
-        "goals","assists",
+    "match_id","player_id","team_id",
+    "goals","assists",
     "shots_total","shots_on_target",
-        "yellow_cards","red_cards",
-        "passes","tackles",
+    "passes","tackles",
     "rating","minutes_played","touches",
-        "is_substitute","was_subbed_in","was_subbed_out",
+    "is_substitute","was_subbed_in","was_subbed_out",
     },
     "match_stats": {
         "match_id","team_id","possession","shots_total","shots_on_target","corners","fouls",
-        "offsides","yellow_cards","red_cards","passes","pass_accuracy","xg","xa","saves",
+        "offsides","yellow_cards","red_cards","passes","pass_accuracy","xg","saves",
         "updated_at",
     },
     "standings": {
-        "competition_id","season","team_id","rank","played","wins","draws","losses",
-        "goals_for","goals_against","points","form","updated_at",
+    "competition_id","season","team_id","rank","played","wins","draws","losses",
+    "goals_for","goals_against","points","updated_at",
     },
     "match_managers": {"match_id","manager_id","team_id","side"},
 
@@ -157,7 +166,7 @@ _INT_FIELDS: Dict[str, Set[str]] = {
 }
 _FLOAT_FIELDS: Dict[str, Set[str]] = {
     "player_stats": {"rating"},
-    "match_stats": {"xg","xa"},
+    "match_stats": {"xg"},
     "shots": {"xg","x","y"},
     "average_positions": {"avg_x","avg_y"},
 }
@@ -227,6 +236,39 @@ def _clean_rows(table: str, rows: Iterable[Dict[str, Any]]) -> List[Dict[str, An
                         v = int(dt.timestamp())
                     except Exception:
                         v = None
+            elif table == "players" and k == "date_of_birth" and v is not None:
+                # DB column is integer (year). Accept YYYY, YYYY-MM-DD, or timestamp.
+                try:
+                    if isinstance(v, (int, float)):
+                        # treat as epoch seconds -> extract year if plausible range
+                        ts = int(v)
+                        if ts > 10**8 or ts < -10**8:  # looks like epoch
+                            from datetime import datetime
+                            v = datetime.utcfromtimestamp(ts).year
+                        else:
+                            # already maybe a year number
+                            v = int(str(ts)[:4])
+                    elif isinstance(v, str):
+                        yr = None
+                        if v.isdigit() and len(v) >= 4:
+                            yr = int(v[:4])
+                        elif len(v) >= 4:
+                            # take first 4 digit sequence
+                            import re
+                            m = re.search(r"(19|20)\d{2}", v)
+                            if m:
+                                yr = int(m.group(0))
+                        if yr:
+                            v = yr
+                        else:
+                            v = None
+                    # basic sanity
+                    if isinstance(v, int) and (1800 <= v <= datetime.utcnow().year):
+                        pass
+                    else:
+                        v = None
+                except Exception:
+                    v = None
             # numeric coercion
             if k in int_fields:
                 v = _to_int(v)
