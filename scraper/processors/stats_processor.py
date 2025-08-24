@@ -9,24 +9,11 @@ def _to_int(x) -> Optional[int]:
         return None
 
 class StatsProcessor:
-    """
-    Processes raw statistics returned by SofaScore for matches and players.
+    """Enhanced SofaScore stats parser (match + player).
 
-    For match statistics, SofaScore may return a heterogeneous set of items,
-    each describing a metric for the home and away team.  We convert this
-    into a row per side containing only the metrics supported by our
-    ``match_stats`` table (possession, shots_total, shots_on_target,
-    corners, fouls, offsides, yellow_cards, red_cards, passes,
-    pass_accuracy, xg, xa, saves).
-
-    For player statistics, SofaScore returns a list of players and their
-    stats.  We extract a subset that fits the ``player_stats`` schema.  The
-    current schema includes goals, assists, shots, passes, tackles,
-    rating, minutes_played and substitution flags.  Fields such as
-    ``shots_total`` or disciplinary cards are no longer persisted at the
-    player level and will be omitted.  Unknown or missing values are set to
-    ``None``.  We retain the team side ('home' or 'away') to allow later
-    mapping of team IDs.
+    Adds robust player stat synonyms: shots_total, shots_on_target, touches,
+    yellow_cards, red_cards besides legacy fields. Keeps backward
+    compatible 'shots' alias.
     """
 
     # Mapping of normalised statistic names to our canonical field names
@@ -36,21 +23,26 @@ class StatsProcessor:
         "possession%": "possession",
         "possessionpercentage": "possession",
         "totalshots": "shots_total",
+        "totalshotsongoal": "shots_total",  # occasionally seen variant meaning overall shots
         "shots": "shots_total",
         "shotstotal": "shots_total",
         "shotsontarget": "shots_on_target",
         "shots_on_target": "shots_on_target",
         "shotsongoal": "shots_on_target",
+        "shotsongoal%": "shots_on_target",
+        "shotsongoalpercent": "shots_on_target",
+        "shotsoffgoal": "shots_total",  # we fold off-target into total only
         "corners": "corners",
-        "cornerkicks": "corners",
         "cornerkicks": "corners",
         "fouls": "fouls",
         "foulscommitted": "fouls",
         "offsides": "offsides",
         "offside": "offsides",
         "yellowcards": "yellow_cards",
+        "yellowcard": "yellow_cards",
         "yellow card": "yellow_cards",
         "redcards": "red_cards",
+        "redcard": "red_cards",
         "red card": "red_cards",
         "totalpasses": "passes",
         "passes": "passes",
@@ -65,6 +57,9 @@ class StatsProcessor:
         "expectedassists": "xa",
         "saves": "saves",
         "goalkeepersaves": "saves",
+        "goalkeepersave": "saves",
+        "goalkeepersaves%": "saves",
+        "goalkeepersavespercent": "saves",
     }
 
     def _parse_value(self, v: Any) -> Optional[float]:
@@ -117,56 +112,77 @@ class StatsProcessor:
         return out
 
     def process_player_stats(self, raw: Dict[str, Any], event_id: int) -> List[Dict[str, Any]]:
-        """Parse player‑level statistics into DB‑friendly rows."""
         out: List[Dict[str, Any]] = []
         teams: List[Tuple[str, Any]] = []
-        # Various raw formats: either keyed by "home"/"away" or a generic "players" list
         if "home" in raw or "away" in raw:
             teams = [("home", raw.get("home")), ("away", raw.get("away"))]
         elif "players" in raw:
             teams = [("home", raw), ("away", raw)]
+        syn = {
+            "minutes_played": ["minutesplayed", "minutes", "playedminutes"],
+            "shots_total": ["totalshots", "shotstotal", "shots"],
+            "shots_on_target": ["shotsontarget", "ontargetshots", "shotsongoal"],
+            "touches": ["touches", "balltouches", "totaltouches"],
+            "yellow_cards": ["yellowcards", "yellow"],
+            "red_cards": ["redcards", "red"],
+            "passes": ["totalpasses", "passes", "passestotal"],
+            "tackles": ["tackles", "tackleswon"],
+        }
+        def _pull(stats: Dict[str, Any], canonical: str):
+            for k in [canonical] + syn.get(canonical, []):
+                if k in stats and stats[k] not in (None, ""):
+                    return stats[k]
+            return None
         for side, node in teams:
             if not node:
                 continue
-            plist = node.get("players") or []
-            for p in plist:
+            for p in node.get("players") or []:
                 pl = p.get("player") or {}
                 pid = pl.get("id")
                 if not pid:
                     continue
                 stats = p.get("statistics") or p.get("stats") or {}
-                # Build the base stat record.  Use helper _to_int for integer fields.
-                # Build the base stat record.  Only include fields supported
-                # by the ``player_stats`` table: goals, assists, shots,
-                # passes, tackles, rating, minutes_played and substitution
-                # flags.  Additional granular shot counts or card counts
-                # are deliberately omitted because they are not persisted
-                # at the player level in the current schema.
+                norm: Dict[str, Any] = {}
+                for k, v in stats.items():
+                    if isinstance(k, str):
+                        norm[k.strip().lower().replace(" ", "").replace("_", "")] = v
+                minutes_played = _to_int(_pull(norm, "minutes_played"))
+                # Fallback: ONLY if minutes is missing (None) and player marked as starter, assume 90.
+                # If it's explicitly 0 we keep 0 (means no minutes / DNP in your workflow).
+                if minutes_played is None and (p.get("isStarting") or p.get("starting")):
+                    minutes_played = 90
+                shots_total = _to_int(_pull(norm, "shots_total"))
+                shots_on_target = _to_int(_pull(norm, "shots_on_target"))
+                touches = _to_int(_pull(norm, "touches"))
+                # Rating variants (some payloads use ratingNum / playerRating)
+                raw_rating = stats.get("rating") or stats.get("ratingNum") or stats.get("playerRating")
+                try:
+                    rating_val = float(raw_rating) if raw_rating not in (None, "") else None
+                except Exception:
+                    rating_val = None
                 rec: Dict[str, Any] = {
                     "source": "sofascore",
                     "source_event_id": int(event_id),
                     "team": side,
                     "player_sofascore_id": pid,
-                    "minutes_played": _to_int(stats.get("minutesPlayed") or stats.get("minutes")),
-                    # Convert rating to float if present
-                    "rating": (float(stats.get("rating")) if isinstance(stats.get("rating"), (int, float, str)) and str(stats.get("rating")).strip() else None),
+                    "minutes_played": minutes_played,
+                    "rating": rating_val,
                     "goals": _to_int(stats.get("goals")),
                     "assists": _to_int(stats.get("assists")),
-                    # Shots: use legacy total shots if available, otherwise None
-                    "shots": _to_int(stats.get("shotsTotal") or stats.get("totalShots") or stats.get("shots")),
-                    "passes": _to_int(stats.get("totalPasses") or stats.get("passes") or stats.get("passesTotal")),
-                    "tackles": _to_int(stats.get("tackles")),
+                    "shots_total": shots_total,
+                    "shots_on_target": shots_on_target,
+                    "passes": _to_int(_pull(norm, "passes")),
+                    "tackles": _to_int(_pull(norm, "tackles")),
+                    "yellow_cards": _to_int(_pull(norm, "yellow_cards")),
+                    "red_cards": _to_int(_pull(norm, "red_cards")),
+                    "touches": touches,
                 }
-                # Optional substitution indicators
                 is_sub = p.get("isSubstitute") or p.get("substitute")
                 if is_sub is not None:
                     rec["is_substitute"] = bool(is_sub)
-                # Flags for subbed in/out – mark True if any value present
-                sub_in = stats.get("subbedIn") or stats.get("wasSubbedIn") or p.get("subbedInTime")
-                if sub_in:
+                if stats.get("subbedIn") or stats.get("wasSubbedIn") or p.get("subbedInTime"):
                     rec["was_subbed_in"] = True
-                sub_out = stats.get("subbedOut") or stats.get("wasSubbedOut") or p.get("subbedOutTime")
-                if sub_out:
+                if stats.get("subbedOut") or stats.get("wasSubbedOut") or p.get("subbedOutTime"):
                     rec["was_subbed_out"] = True
                 out.append(rec)
         return out

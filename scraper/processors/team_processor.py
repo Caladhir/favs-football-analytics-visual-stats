@@ -25,12 +25,51 @@ class TeamProcessor:
                 except Exception:
                     name_val = "Team"
             short_val = t.get("shortName") or (t.get("name") or "")[:15]
-            return {
+            # Colors (fallback defaults to keep UI readable)
+            colors = t.get("teamColors") or {}
+            primary_color = colors.get("primary") or "#222222"
+            secondary_color = colors.get("secondary") or "#FFFFFF"
+            # Founded year (timestamp -> year) if available
+            founded = None
+            for key in ("foundationDateTimestamp", "founded", "foundation", "foundedYear"):
+                val = t.get(key)
+                if val:
+                    try:
+                        # If it's a large epoch (seconds) convert to year
+                        if isinstance(val, (int, float)) and val > 10**8:
+                            from datetime import datetime
+                            founded = datetime.utcfromtimestamp(int(val)).year
+                        else:
+                            founded = int(str(val)[:4])  # naive parse
+                        break
+                    except Exception:
+                        founded = None
+            # Venue details
+            venue_name = None
+            venue_capacity = None
+            venue = t.get("venue") or {}
+            if isinstance(venue, dict):
+                venue_name = venue.get("name") or venue.get("stadiumName")
+                venue_capacity = venue.get("capacity") or venue.get("stadiumCapacity")
+            # Logo URL pattern
+            logo_url = f"https://img.sofascore.com/api/v1/team/{sid}/image" if sid else None
+            row = {
                 "sofascore_id": int(sid),
                 "name": name_val,
                 "short_name": short_val,
                 "country": country,
+                "primary_color": primary_color,
+                "secondary_color": secondary_color,
             }
+            if founded:
+                row["founded"] = founded
+            if venue_name:
+                row["venue"] = venue_name
+            if venue_capacity:
+                row["venue_capacity"] = venue_capacity
+            if logo_url:
+                row["logo_url"] = logo_url
+            return row
 
         for side in ("home", "away"):
             row = _one(side)
@@ -47,11 +86,24 @@ class TeamProcessor:
                 pid = pl.get("id")
                 if not pid:
                     continue
+                # Birth date (if provided directly in lineup payload)
+                birth_date = None
+                dob_ts = pl.get("dateOfBirthTimestamp") or pl.get("dateOfBirth")
+                if dob_ts:
+                    try:
+                        val = int(dob_ts)
+                        if val > 10**12:  # ms -> s
+                            val //= 1000
+                        from datetime import datetime
+                        birth_date = datetime.utcfromtimestamp(val).strftime("%Y-%m-%d")
+                    except Exception:
+                        birth_date = None
                 out[int(pid)] = {
                     "sofascore_id": int(pid),
                     "full_name": pl.get("name"),
                     "number": p.get("jerseyNumber"),
                     "position": p.get("position"),
+                    "birth_date": birth_date,
                 }
         return list(out.values())
 
@@ -114,8 +166,24 @@ class TeamProcessor:
                     "player_sofascore_id": player_id,
                     "jersey_number": jersey,
                     "position": pos,
-                    "is_starting": bool(p.get("isStarting") or p.get("starting")),
+                    # Starting flag heuristics:
+                    # 1. Direct flags isStarting / starting
+                    # 2. Some payloads only mark substitutes (isSubstitute / substitute = True) -> then starter = not substitute
+                    # 3. Presence of subbedInTime but not subbedOutTime usually means came on as sub (so not starter)
+                    # 4. Explicit lineup arrays sometimes have "formationPlace" for starters; treat its presence as indicator.
+                    "is_starting": bool(
+                        p.get("isStarting")
+                        or p.get("starting")
+                        or (
+                            (p.get("isSubstitute") is not True and p.get("substitute") is not True)
+                            and not p.get("subbedInTime")  # not explicitly a sub coming on
+                        )
+                        or (p.get("formationPlace") not in (None, "") and not p.get("subbedInTime"))
+                    ),
                     "is_captain": bool(p.get("isCaptain") or p.get("captain")),
+                    # Pass through raw substitution timing markers for later minutes reconstruction downstream.
+                    "_subbed_in_time": p.get("subbedInTime") or None,
+                    "_subbed_out_time": p.get("subbedOutTime") or None,
                 })
         return out
 

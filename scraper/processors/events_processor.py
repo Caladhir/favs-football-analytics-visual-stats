@@ -160,6 +160,37 @@ class EventsProcessor:
                 # Last resort: skip if absolutely no way to infer; log small sample.
                 logger.debug(f"[events_processor] Skipping incident without team side ev={ev_id} type={etype} raw_keys={list(inc.keys())[:6]}")
                 continue
+            # Additional participant context (for substitutions/goals/cards)
+            primary_player_id = None
+            assist_player_id = None
+            out_player_id = None
+            in_player_id = None
+            try:
+                p_obj = inc.get("player") or {}
+                primary_player_id = p_obj.get("id")
+            except Exception:
+                primary_player_id = None
+            # Goal assist patterns
+            a_obj = inc.get("assist") or inc.get("secondaryPlayer") or {}
+            if isinstance(a_obj, dict):
+                assist_player_id = a_obj.get("id")
+            # Substitution specific: some feeds provide substitution object / relatedEvent
+            if etype == "substitution":
+                # Common structures: {playerIn, playerOut} or {player, relatedPlayer}
+                pin = inc.get("playerIn") or inc.get("player_in") or inc.get("playerInPlayer")
+                pout = inc.get("playerOut") or inc.get("player_out") or inc.get("playerOutPlayer")
+                if pin and isinstance(pin, dict):
+                    in_player_id = pin.get("id")
+                if pout and isinstance(pout, dict):
+                    out_player_id = pout.get("id")
+                # fallback to player/relatedPlayer naming
+                if not in_player_id and inc.get("player") and inc.get("relatedPlayer"):
+                    # heuristics: player is coming in if has minutes=0? We just store both for post-processing
+                    try:
+                        in_player_id = inc.get("player", {}).get("id")
+                        out_player_id = inc.get("relatedPlayer", {}).get("id")
+                    except Exception:
+                        pass
             rows.append({
                 "source": "sofascore",
                 "source_event_id": ev_id,
@@ -167,7 +198,12 @@ class EventsProcessor:
                 "event_type": etype,
                 "team": team_side,
                 "player_name": pname,
-                "description": inc.get("description"),
+                "player_sofascore_id": primary_player_id,
+                "assist_player_sofascore_id": assist_player_id,
+                "player_in_sofascore_id": in_player_id,
+                "player_out_sofascore_id": out_player_id,
+                # Description fallback: prefer explicit description/text, fallback to raw type.
+                "description": inc.get("description") or inc.get("text") or inc.get("detail") or raw_type,
             })
         # Log if we failed to resolve most minutes for this match
         if rows:

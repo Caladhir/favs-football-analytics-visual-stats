@@ -76,7 +76,7 @@ def upsert_manager(manager, team_id):
         "id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f"sofa_manager_{manager['sofascore_id']}")),
         "full_name": manager.get("name"),
         "nationality": manager.get("country", {}).get("name"),
-        "birth_date": manager.get("dateOfBirth"),
+    "date_of_birth": manager.get("dateOfBirth"),
         "team_id": team_id,
         "sofascore_id": manager.get("sofascore_id")
     }

@@ -45,7 +45,19 @@ def dedupe_matches(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             return a if score_a else b
         ua = a.get("updated_at") or a.get("last_seen_at") or ""
         ub = b.get("updated_at") or b.get("last_seen_at") or ""
-        return b if ub > ua else a
+        chosen = b if ub > ua else a
+        # If either candidate has final_* and is_finished, preserve that snapshot in chosen
+        for cand in (a, b):
+            try:
+                if cand.get("is_finished") and cand.get("final_home_score") is not None and cand.get("final_away_score") is not None:
+                    # Only overwrite if chosen lacks them
+                    if chosen.get("final_home_score") is None:
+                        chosen["final_home_score"] = cand.get("final_home_score")
+                    if chosen.get("final_away_score") is None:
+                        chosen["final_away_score"] = cand.get("final_away_score")
+            except Exception:
+                pass
+        return chosen
 
     by_src: Dict[Tuple[str, int], Dict[str, Any]] = {}
     by_id: Dict[str, Dict[str, Any]] = {}
@@ -85,7 +97,7 @@ _ALLOWED = {
     "height_cm","sofascore_id",
     },
     "managers": {
-        "full_name","nationality","birth_date","team_id","sofascore_id",
+    "full_name","nationality","date_of_birth","team_id","sofascore_id",
     },
     "matches": {
         "home_team","away_team","home_score","away_score","start_time","status",
@@ -101,10 +113,10 @@ _ALLOWED = {
     "player_stats": {
         "match_id","player_id","team_id",
         "goals","assists",
-        "shots","shots_total","shots_on_target",
+    "shots_total","shots_on_target",
         "yellow_cards","red_cards",
         "passes","tackles",
-        "rating","minutes_played",
+    "rating","minutes_played","touches",
         "is_substitute","was_subbed_in","was_subbed_out",
     },
     "match_stats": {
@@ -118,11 +130,11 @@ _ALLOWED = {
     },
     "match_managers": {"match_id","manager_id","team_id","side"},
 
-    # NEW
-    "average_positions": {"match_id","player_id","team_id","avg_x","avg_y","touches","minutes_played"},
+    # average_positions no longer stores touches/minutes (moved to player_stats)
+    "average_positions": {"match_id","player_id","team_id","avg_x","avg_y"},
     "shots": {
-        "match_id","team_id","player_id","assist_player_id",
-        "minute","second","x","y","xg",
+    "match_id","team_id","player_id","assist_player_id",
+    "minute","x","y","xg",
         "body_part","situation",
         "is_penalty","is_own_goal","outcome",
         "source","source_event_id","source_item_id",
@@ -132,15 +144,16 @@ _ALLOWED = {
 _INT_FIELDS: Dict[str, Set[str]] = {
     "players": {"number","age","height_cm"},
     "lineups": {"jersey_number"},
-    "player_stats": {"goals","assists","shots","shots_total","shots_on_target","yellow_cards","red_cards",
-                     "passes","tackles","minutes_played"},
+    "player_stats": {"goals","assists","shots_total","shots_on_target","yellow_cards","red_cards",
+                     "passes","tackles","minutes_played","touches"},
     "match_events": {"minute"},
     "match_stats": {"possession","shots_total","shots_on_target","corners","fouls","offsides",
                     "yellow_cards","red_cards","passes","pass_accuracy","saves"},
     "standings": {"rank","played","wins","draws","losses","goals_for","goals_against","points"},
-    "matches": {"minute","home_score","away_score","league_priority"},
-    "average_positions": {"touches","minutes_played"},
-    "shots": {"minute","second","source_event_id","source_item_id"},
+    "matches": {"minute","home_score","away_score","league_priority","current_period_start"},
+    # average_positions now only has numeric coords (handled in _FLOAT_FIELDS)
+    "average_positions": set(),
+    "shots": {"minute","source_event_id","source_item_id"},
 }
 _FLOAT_FIELDS: Dict[str, Set[str]] = {
     "player_stats": {"rating"},
@@ -206,6 +219,14 @@ def _clean_rows(table: str, rows: Iterable[Dict[str, Any]]) -> List[Dict[str, An
                 # Normalize round from nested objects
                 if k == "round" and isinstance(v, dict):
                     v = v.get("round")
+                if k == "current_period_start" and isinstance(v, str):
+                    # Attempt ISO8601 -> epoch seconds conversion for BIGINT column
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(v.replace("Z","+00:00"))
+                        v = int(dt.timestamp())
+                    except Exception:
+                        v = None
             # numeric coercion
             if k in int_fields:
                 v = _to_int(v)
@@ -475,29 +496,139 @@ class DatabaseClient:
 
     def upsert_managers(self, rows: List[Dict[str, Any]]) -> tuple[int, int]:
         """
-        Upsert managers keyed by sofascore_id.
-        Accepts rows with any of: full_name, nationality, birth_date, team_id, sofascore_id.
-        Dedupes by sofascore_id, preferring entries that include team_id or full_name when duplicates occur.
+        Upsert managers respecting the UNIQUE constraint on sofascore_id.
+
+        Strategy change (fix duplicate key 23505 on managers_sofascore_id_key):
+        - If row has sofascore_id -> ALWAYS upsert on sofascore_id (even if full_name/team_id present). This prevents
+          inserts that would violate the unique index when using a different conflict target (full_name,team_id).
+        - Rows without sofascore_id but with (full_name AND team_id) -> upsert on (full_name,team_id).
+        - Rows without any reliable key are skipped.
+        Dedupe inside each bucket preferring richer rows (nationality, birth_date, team_id).
         """
-        clean = _clean_rows("managers", rows)
+        # Normalize legacy key 'birth_date' -> 'date_of_birth'
+        norm_rows: List[Dict[str, Any]] = []
+        for r in rows:
+            if isinstance(r, dict):
+                if "birth_date" in r and "date_of_birth" not in r:
+                    r = {**r, "date_of_birth": r.get("birth_date")}
+            norm_rows.append(r)
+        clean = _clean_rows("managers", norm_rows)
+        try:
+            total_raw = len(norm_rows)
+            total_clean = len(clean)
+            nat_raw = sum(1 for r in norm_rows if (r or {}).get("nationality"))
+            dob_raw = sum(1 for r in norm_rows if (r or {}).get("date_of_birth") or (r or {}).get("birth_date"))
+            nat_clean = sum(1 for r in clean if r.get("nationality"))
+            dob_clean = sum(1 for r in clean if r.get("date_of_birth"))
+            if total_clean:
+                logger.info(
+                    f"core.database | managers pre-upsert raw={total_raw} clean={total_clean} nat_raw={nat_raw} nat_clean={nat_clean} dob_raw={dob_raw} dob_clean={dob_clean}"
+                )
+                sample = [
+                    {k: v for k, v in r.items() if k in ("sofascore_id","full_name","nationality","date_of_birth","team_id")}
+                    for r in clean[:3]
+                ]
+                logger.debug(f"core.database | managers sample_clean={sample}")
+        except Exception as _log_ex:
+            logger.debug(f"core.database | managers logging skipped: {_log_ex}")
         if not clean:
             return (0, 0)
-        tmp: Dict[Any, Dict[str, Any]] = {}
+        bucket_sofa: Dict[int, Dict[str, Any]] = {}
+        bucket_ft: Dict[tuple, Dict[str, Any]] = {}
+
+        def richness(m: Dict[str, Any]) -> tuple[int, int, int]:
+            # (has nationality, has date_of_birth, has team_id) for ordering
+            return (
+                1 if m.get("nationality") else 0,
+                1 if (m.get("date_of_birth") or m.get("birth_date")) else 0,
+                1 if m.get("team_id") else 0,
+            )
+
         for m in clean:
-            k = m.get("sofascore_id")
-            if k is None:
+            sid = m.get("sofascore_id")
+            if sid is not None:  # primary bucket
+                prev = bucket_sofa.get(sid)
+                if not prev or richness(m) > richness(prev):
+                    bucket_sofa[sid] = m
                 continue
-            prev = tmp.get(k)
-            if not prev:
-                tmp[k] = m
-            else:
-                # prefer with team_id; then prefer with full_name
-                score_prev = int(bool(prev.get("team_id"))) + int(bool(prev.get("full_name")))
-                score_new = int(bool(m.get("team_id"))) + int(bool(m.get("full_name")))
-                if score_new >= score_prev:
-                    tmp[k] = m
-        payload = list(tmp.values())
-        return self._upsert("managers", payload, on_conflict="sofascore_id")
+            fname = (m.get("full_name") or "").strip().lower()
+            tid = m.get("team_id")
+            if fname and tid:  # only if we lack sofascore_id
+                key = (fname, tid)
+                prev = bucket_ft.get(key)
+                if not prev or richness(m) > richness(prev):
+                    bucket_ft[key] = m
+
+        payload_sid = list(bucket_sofa.values())
+        payload_ft = list(bucket_ft.values())
+
+        ok = fail = 0
+        # PRE-FLIGHT: attempt in-place updates for rows whose (full_name,team_id) already exist to avoid
+        # violating the managers_fullname_team_unique constraint when we later upsert on sofascore_id.
+        sid_insert_candidates: List[Dict[str, Any]] = []
+        pre_updated = pre_failed = 0
+        for m in payload_sid:
+            fname = m.get("full_name")
+            tid = m.get("team_id")
+            if fname and tid:
+                # Only attempt update where an existing row matches by (full_name,team_id).
+                # We update even if that row already has a (different) sofascore_id to consolidate data;
+                # if that would clash with another row having the incoming sofascore_id we'll log and skip.
+                upd = {k: v for k, v in m.items() if k != "sofascore_id" and v is not None}
+                # fetch current row to avoid downgrading non-null to null
+                try:
+                    cur = (
+                        self.client.table("managers")
+                        .select("nationality,date_of_birth")
+                        .eq("full_name", fname)
+                        .eq("team_id", tid)
+                        .limit(1)
+                        .execute()
+                    )
+                    if cur.data:
+                        cur0 = cur.data[0]
+                        if cur0.get("nationality") and not upd.get("nationality"):
+                            upd.pop("nationality", None)
+                        if cur0.get("date_of_birth") and not upd.get("date_of_birth"):
+                            upd.pop("date_of_birth", None)
+                except Exception:
+                    pass
+                upd["sofascore_id"] = m.get("sofascore_id")
+                try:
+                    res = (
+                        self.client.table("managers")
+                        .update(upd)
+                        .eq("full_name", fname)
+                        .eq("team_id", tid)
+                        .execute()
+                    )
+                    if res.data and len(res.data) > 0:
+                        pre_updated += len(res.data)
+                        ok += len(res.data)
+                        continue  # don't include in insert candidates
+                except Exception as ex:
+                    pre_failed += 1
+                    logger.warning(f"core.database | managers pre-update failed full_name={fname} team_id={tid}: {ex}")
+            sid_insert_candidates.append(m)
+
+        if sid_insert_candidates:  # now safe to bulk upsert remaining by sofascore_id
+            # Remove nulls that would overwrite existing non-null values during conflict update
+            sid_clean = []
+            for m in sid_insert_candidates:
+                sid_clean.append({k: v for k, v in m.items() if v is not None})
+            s_ok, s_fail = self._upsert("managers", sid_clean, on_conflict="sofascore_id")
+            ok += s_ok; fail += s_fail
+        if payload_ft:
+            ft_ok, ft_fail = self._upsert("managers", payload_ft, on_conflict="full_name,team_id")
+            ok += ft_ok; fail += ft_fail
+        if pre_updated or pre_failed:
+            logger.info(
+                f"core.database | managers pre-update existing name+team updated={pre_updated} failed={pre_failed}"
+            )
+        logger.info(
+            f"core.database | managers upsert sofascore={len(payload_sid)} name_team_only={len(payload_ft)} inserted_sid={len(sid_insert_candidates)} ok={ok} fail={fail}"
+        )
+        return (ok, fail)
 
     def upsert_match_managers(self, data, match_map: dict | None = None, team_map: dict | None = None) -> tuple[int, int]:
         """
@@ -715,11 +846,11 @@ class DatabaseClient:
             k = (r.get("match_id"), r.get("player_id"))
             if not all(k):
                 continue
-            # prefer row that has higher minutes or rating if duplicate
+            # prefer row with higher minutes, then rating, then touches
             if k in tmp:
                 a = tmp[k]; b = r
-                score_a = (a.get("minutes_played") or 0, a.get("rating") or 0)
-                score_b = (b.get("minutes_played") or 0, b.get("rating") or 0)
+                score_a = (a.get("minutes_played") or 0, a.get("rating") or 0, a.get("touches") or 0)
+                score_b = (b.get("minutes_played") or 0, b.get("rating") or 0, b.get("touches") or 0)
                 if score_b > score_a:
                     tmp[k] = b
             else:
@@ -742,7 +873,7 @@ class DatabaseClient:
 
     def upsert_shots(self, rows: List[Dict[str, Any]]) -> tuple[int, int]:
         """Upsert rows into shots.
-        Conflict key: (match_id, player_id, minute, second, x, y, outcome)
+    Conflict key: (match_id, player_id, minute, x, y, outcome)  -- kolona 'second' više ne postoji u DB.
         Returns (ok, fail). Adds verbose diagnostics to trace zero-save issues.
         """
         pre = len(rows)
@@ -755,28 +886,75 @@ class DatabaseClient:
 
         dedup: Dict[Tuple, Dict[str, Any]] = {}
         dropped_required = 0
+        # Allowed outcomes per CURRENT DB CHECK constraint:
+        #   goal,on_target,off_target,blocked,saved,woodwork,saved_off_target
+        # Normalise a wider provider set into these. Anything unknown -> off_target.
+        allowed_db = {"goal","on_target","off_target","blocked","saved","woodwork","saved_off_target"}
+        outcome_map = {
+            # direct
+            "goal": "goal",
+            "on_target": "on_target",
+            "off_target": "off_target",
+            "blocked": "blocked",
+            "saved": "saved",
+            "woodwork": "woodwork",
+            "saved_off_target": "saved_off_target",
+            # synonyms / granular
+            "own_goal": "goal",  # treat own goal as goal for shot outcome summary
+            "post": "woodwork",
+            "bar": "woodwork",
+            "blocked_deflection": "blocked",
+            "keeper_saved": "saved",
+            "keeper_saved_deflection": "saved",
+            "saved_to_post": "saved",
+            "saved_woodwork": "saved",
+            # penalties
+            "pen_scored": "goal",
+            "pen_saved": "saved",
+            "pen_miss": "off_target",
+            "pen_post": "woodwork",
+            "pen_bar": "woodwork",
+        }
+        remapped_outcomes = 0
         for r in clean:
+            oc_raw = (r.get("outcome") or "").strip().lower()
+            mapped = outcome_map.get(oc_raw, oc_raw)
+            if mapped not in allowed_db:
+                # final fallback
+                if mapped not in (None, ""):
+                    remapped_outcomes += 1
+                mapped = "off_target"
+            if mapped != r.get("outcome"):
+                remapped_outcomes += 1 if oc_raw else 0
+                r["outcome"] = mapped
+            # 'second' više ne postoji u tablici – ignoriramo ju ako je prisutna u inputu
+            if "second" in r:
+                r.pop("second", None)
             k = (
-                r.get("match_id"), r.get("player_id"), r.get("minute"), r.get("second"),
+                r.get("match_id"), r.get("player_id"), r.get("minute"),
                 r.get("x"), r.get("y"), r.get("outcome"),
             )
-            # allow second to be None but others required
-            if None in (k[0], k[1], k[2], k[4], k[5], k[6]):
+            if None in k:  # svi elementi ključa moraju postojati
                 dropped_required += 1
                 continue
             dedup[k] = r
         payload = list(dedup.values())
+        # Whitelist columns actually present in public.shots to avoid PostgREST schema cache errors
+        shots_columns = {"match_id","team_id","player_id","minute","x","y","xg","body_part","situation","is_penalty","is_own_goal","outcome","assist_player_id","source","source_event_id","source_item_id"}
         for p in payload:
-            p.pop("team_id", None)
+            junk = [k for k in p.keys() if k not in shots_columns]
+            for k in junk:
+                p.pop(k, None)
         logger.info(
-            f"core.database | shots payload ready size={len(payload)} dropped_required={dropped_required} distinct_keys={len(dedup)}"
+            f"core.database | shots payload ready size={len(payload)} dropped_required={dropped_required} distinct_keys={len(dedup)} remapped_outcomes={remapped_outcomes}"
         )
         if not payload:
             return (0, pre)
         try:
             resp = self.client.table("shots").upsert(
                 payload,
-                on_conflict="match_id,player_id,minute,second,x,y,outcome"
+                # Napomena: potreban je UNIQUE indeks nad ovim kolonama za optimalan UPSERT.
+                on_conflict="match_id,player_id,minute,x,y,outcome"
             ).execute()
             returned = len(resp.data or [])
             inserted = returned if returned > 0 else len(payload)
@@ -787,11 +965,14 @@ class DatabaseClient:
                 logger.warning("core.database | shots upsert returned 0 rows (possibly no select privilege on table)")
             return (inserted, 0 if inserted == len(payload) else max(0, len(payload) - inserted))
         except Exception as e:
-            msg_low = str(e).lower()
-            if ("does not exist" in msg_low or "relation" in msg_low) and "shots" in msg_low:
-                logger.error("core.database | shots table missing. Create table before ingesting shots.")
+            msg_full = str(e)
+            msg_low = msg_full.lower()
+            logger.error(f"core.database | shots bulk upsert exception: {msg_full}")
+            # Only treat as missing table if explicit pattern present
+            if ('relation' in msg_low and 'shots' in msg_low and 'does not exist' in msg_low) or ('table' in msg_low and 'shots' in msg_low and 'not exist' in msg_low):
+                logger.error("core.database | detected shots table missing based on error pattern; verify schema/search_path")
                 return (0, len(payload))
-            logger.warning(f"core.database | shots batch upsert failed, fallback per-row: {e}")
+            logger.warning("core.database | shots batch upsert failed, attempting per-row fallback")
             ok = fail = 0
             for idx, item in enumerate(payload):
                 try:
@@ -804,16 +985,15 @@ class DatabaseClient:
                     else:
                         fail += 1
                         if fail == 1:
-                            logger.warning(f"core.database | shots insert problem: {ex}")
+                            logger.warning(f"core.database | shots insert problem: {ex} item={item}")
                         if "cross-database references" in em:
                             fail += len(payload) - idx - 1
                             break
             return (ok, fail)
 
     def upsert_average_positions(self, rows: List[Dict[str, Any]]) -> tuple[int, int]:
-        """
-        Prihvaća rows s ključevima (match_id, player_id, team_id, x, y, touches?, minutes_played?)
-        i mapira x->avg_x, y->avg_y u tablicu average_positions.
+        """Store average positions (match_id, player_id, team_id, x|avg_x, y|avg_y).
+        Schema change: touches / minutes_played moved to player_stats so we ignore them here.
         """
         if not rows:
             return (0, 0)
@@ -834,14 +1014,10 @@ class DatabaseClient:
                 "team_id": r.get("team_id"),
                 "avg_x": raw_x,
                 "avg_y": raw_y,
-                "touches": r.get("touches"),
-                "minutes_played": r.get("minutes_played"),
             })
         pre = len(mapped)
         clean = _clean_rows("average_positions", mapped)
-        touch_present = sum(1 for r in clean if r.get("touches") is not None)
-        mins_present = sum(1 for r in clean if r.get("minutes_played") is not None)
-        logger.debug(f"[db.upsert_average_positions] incoming={len(rows)} mapped={pre} clean={len(clean)} touches_present={touch_present} minutes_present={mins_present}")
+        logger.debug(f"[db.upsert_average_positions] incoming={len(rows)} mapped={pre} clean={len(clean)}")
         if not clean:
             return (0, 0)
 

@@ -12,11 +12,9 @@ from typing import Any, Dict, List, Tuple, Optional
 # Put both project root and scraper/ on sys.path
 THIS = Path(__file__).resolve()
 SCRAPER_DIR = THIS.parents[1]          # ...\favs-app\scraper
-PROJECT_ROOT = SCRAPER_DIR.parent      # ...\favs-app
 if str(SCRAPER_DIR) not in sys.path:
     sys.path.insert(0, str(SCRAPER_DIR))
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+
 
 from utils.logger import get_logger
 from core.database import db
@@ -26,7 +24,7 @@ try:
 except Exception:
     from core.browser import BrowserManager as Browser
 from processors.match_processor import MatchProcessor
-from processors.stats_processor import parse_event_statistics
+from processors.stats_processor import parse_event_statistics, stats_processor
 from processors.standings_processor import StandingsProcessor
 
 logger = get_logger(__name__)
@@ -142,7 +140,7 @@ def enrich_event(browser: Any, event: Dict[str, Any], throttle: float = 0.0) -> 
 
     return enriched
 
-def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
+def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser: Any | None = None, throttle: float = 0.0) -> Dict[str, int]:
     """Store a processed bundle with proper FK mapping.
 
     Steps:
@@ -153,61 +151,153 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
       5. Transform dependent tables (lineups, formations, events, stats) to use match_id / team_id / player_id.
     """
     counts: Dict[str, Tuple[int, int]] = {}
-    try:
-        # 1) base entities
-        comps = bundle.get("competitions", [])
-        if comps:
-            counts["competitions"] = db.upsert_competitions(comps)
-        teams = bundle.get("teams", [])
-        if teams:
-            counts["teams"] = db.upsert_teams(teams)
+    # 1) base entities
+    comps = bundle.get("competitions", [])
+    if comps:
+        counts["competitions"] = db.upsert_competitions(comps)
+    teams = bundle.get("teams", [])
+    if teams:
+        counts["teams"] = db.upsert_teams(teams)
 
-        # Build team map early so we can attach team_id to players before player upsert
-        comp_map = db.get_competition_ids_by_sofa([c.get("sofascore_id") for c in comps]) if comps else {}
-        team_map = db.get_team_ids_by_sofa([t.get("sofascore_id") for t in teams]) if teams else {}
+    # Build team map early so we can attach team_id to players before player upsert
+    comp_map = db.get_competition_ids_by_sofa([c.get("sofascore_id") for c in comps]) if comps else {}
+    team_map = db.get_team_ids_by_sofa([t.get("sofascore_id") for t in teams]) if teams else {}
 
-        # Players: attach team_id if parser left team_sofascore_id
-        # (ENH) U nekim slučajevima shotmap sadrži igrače koji nisu bili u lineups (npr. kasni sub / own goal atribucija) → dodaj placeholder igrače
-        players = []
-        base_players_list = bundle.get("players", []) or []
-        existing_player_ids = {p.get("sofascore_id") for p in base_players_list if p.get("sofascore_id")}
-        # Skupi potencijalno propuštene igrače iz shots prije mapiranja
-        missing_from_shots: set[int] = set()
-        for s in (bundle.get("shots") or []):
-            pid = s.get("player_sofascore_id")
-            if pid and pid not in existing_player_ids:
-                missing_from_shots.add(pid)
-            apid = s.get("assist_player_sofascore_id")
-            if apid and apid not in existing_player_ids:
-                missing_from_shots.add(apid)
-        if missing_from_shots:
-            # Dodaj minimalne zapise; ime kasnije možemo popuniti iz drugih endpointa ako dođe
-            for pid in missing_from_shots:
+    # Players: attach team_id if parser left team_sofascore_id
+    # (ENH) U nekim slučajevima shotmap sadrži igrače koji nisu bili u lineups (npr. kasni sub / own goal atribucija) → dodaj placeholder igrače
+    players = []
+    base_players_list = bundle.get("players", []) or []
+    existing_player_ids = {p.get("sofascore_id") for p in base_players_list if p.get("sofascore_id")}
+    # Skupi potencijalno propuštene igrače iz shots prije mapiranja (jednom, NE u petlji upserta)
+    missing_from_shots: set[int] = set()
+    for s in (bundle.get("shots") or []):
+        pid = s.get("player_sofascore_id")
+        if pid and pid not in existing_player_ids:
+            missing_from_shots.add(pid)
+        apid = s.get("assist_player_sofascore_id")
+        if apid and apid not in existing_player_ids:
+            missing_from_shots.add(apid)
+    if missing_from_shots:
+        # Dodaj minimalne zapise; full_name ne smije biti NULL (NOT NULL constraint)
+        for pid in missing_from_shots:
+            if pid not in existing_player_ids:  # avoid dupe append
                 base_players_list.append({
                     "sofascore_id": pid,
-                    # placeholder polja – izbjegavamo None za NOT NULL ako ih tablica ne traži
-                    "full_name": None,
+                    "full_name": f"Unknown #{pid}",  # placeholder ime
                 })
-            logger.info(f"[players] dodano placeholder iz shots count={len(missing_from_shots)}")
-        for p in base_players_list:
-            p2 = dict(p)
-            tsid = p2.pop("team_sofascore_id", None)
-            if tsid is not None and tsid in team_map and not p2.get("team_id"):
-                p2["team_id"] = team_map.get(tsid)
-            players.append(p2)
-        if players:
-            counts["players"] = db.upsert_players(players)
-            logger.info(f"[players] upsert total={len(players)} (uklj.placeholder) base={len(base_players_list)}")
-        # manager upserts after players so we can map team ids similarly
-        managers = []
-        for m in bundle.get("managers", []) or []:
-            m2 = dict(m)
-            tsid = m2.pop("team_sofascore_id", None)
-            if tsid is not None and tsid in team_map and not m2.get("team_id"):
-                m2["team_id"] = team_map.get(tsid)
-            managers.append(m2)
-        if managers:
-            counts["managers"] = db.upsert_managers(managers)
+        logger.info(f"[players] dodano placeholder iz shots (new) count={len(missing_from_shots)}")
+    # Sada pripremi players payload samo jednom
+    for p in base_players_list:
+        p2 = dict(p)
+        tsid = p2.pop("team_sofascore_id", None)
+        if tsid is not None and tsid in team_map and not p2.get("team_id"):
+            p2["team_id"] = team_map.get(tsid)
+        players.append(p2)
+    if players:
+        counts["players"] = db.upsert_players(players)
+        logger.info(f"[players] upsert total={len(players)} (uklj.placeholder) base={len(base_players_list)}")
+
+    # manager upserts after players so we can map team ids similarly
+    managers = []
+    for m in bundle.get("managers", []) or []:
+        m2 = dict(m)
+        tsid = m2.pop("team_sofascore_id", None)
+        if tsid is not None and tsid in team_map and not m2.get("team_id"):
+            m2["team_id"] = team_map.get(tsid)
+        managers.append(m2)
+    if managers:
+        # Fallback enrichment for managers missing nationality/date_of_birth via manager/{id} endpoint (primary), coach/{id} (legacy)
+        missing_detail = [m for m in managers if not (m.get("nationality") and m.get("date_of_birth")) and m.get("sofascore_id")]
+        if missing_detail:
+            seen_mgr: set[int] = set()
+            for m in missing_detail:
+                mid = m.get("sofascore_id")
+                if mid in seen_mgr:
+                    continue
+                seen_mgr.add(mid)
+                detail = None
+                # Try manager/{id}
+                try:
+                    detail = browser.fetch_data(f"manager/{mid}") or {}
+                    if throttle > 0:
+                        time.sleep(throttle)
+                except Exception as _mgr_ex:
+                    logger.debug(f"[managers][detail_fetch_fail_manager_ep] id={mid} err={_mgr_ex}")
+                # Fallback coach/{id}
+                if not detail:
+                    try:
+                        detail = browser.fetch_data(f"coach/{mid}") or {}
+                        if throttle > 0:
+                            time.sleep(throttle)
+                    except Exception as _mgr_ex2:
+                        logger.debug(f"[managers][detail_fetch_fail_coach_ep] id={mid} err={_mgr_ex2}")
+                if not isinstance(detail, dict):
+                    continue
+                node = None
+                # Possible wrappers: {"manager": {...}} or {"coach": {...}}
+                for key in ("manager","coach"):
+                    if isinstance(detail.get(key), dict):
+                        node = detail.get(key)
+                        break
+                if node is None:
+                    node = detail
+                if not isinstance(node, dict):
+                    continue
+                # Nationality from nested country or flat fields
+                if not m.get("nationality"):
+                    ctry = node.get("country") or {}
+                    nat = None
+                    if isinstance(ctry, dict):
+                        nat = ctry.get("name") or ctry.get("alpha2") or ctry.get("alpha3")
+                    if not nat:
+                        nat = node.get("nationality")
+                    if nat:
+                        m["nationality"] = nat
+                # Date of birth
+                if not m.get("date_of_birth"):
+                    dob = node.get("dateOfBirth") or node.get("birthDate")
+                    ts_raw = node.get("dateOfBirthTimestamp")
+                    if not dob and ts_raw is not None:
+                        try:
+                            ts = int(ts_raw)
+                            # ms -> s if huge positive
+                            if ts > 10**12:
+                                ts //= 1000
+                            # Manual conversion so negative (pre-1970) works cross‑platform
+                            epoch = datetime(1970,1,1, tzinfo=timezone.utc)
+                            dob_dt = epoch + timedelta(seconds=ts)
+                            dob = dob_dt.date().isoformat()
+                        except Exception:
+                            dob = None
+                    if dob:
+                        m["date_of_birth"] = dob
+            miss_nat = sum(1 for x in managers if x.get("nationality"))
+            miss_dob = sum(1 for x in managers if x.get("date_of_birth"))
+            logger.info(f"[managers] after coach fallback enrichment nationality={miss_nat}/{len(managers)} dob={miss_dob}/{len(managers)}")
+        # Deduplicate by (full_name, team_id) first to avoid unique constraint violation
+        dedup: dict[tuple[str, str], dict] = {}
+        for m in managers:
+            fname = (m.get("full_name") or "").strip().lower()
+            tid = m.get("team_id") or ""
+            key = (fname, tid)
+            prev = dedup.get(key)
+            if not prev:
+                dedup[key] = m
+            else:
+                # prefer record with nationality/birth_date
+                score_prev = int(bool(prev.get("nationality"))) + int(bool(prev.get("date_of_birth") or prev.get("birth_date")))
+                score_new = int(bool(m.get("nationality"))) + int(bool(m.get("date_of_birth") or m.get("birth_date")))
+                if score_new > score_prev:
+                    dedup[key] = m
+        # Single logging + single upsert
+        total_mgr = len(managers)
+        nat_cnt = sum(1 for x in managers if x.get("nationality"))
+        dob_cnt = sum(1 for x in managers if x.get("date_of_birth") or x.get("birth_date"))
+        logger.info(f"[managers] pre-dedupe total={total_mgr} with_nat={nat_cnt} with_dob={dob_cnt} unique_pairs={len(dedup)}")
+        dedup_nat = sum(1 for x in dedup.values() if x.get("nationality"))
+        dedup_dob = sum(1 for x in dedup.values() if x.get("date_of_birth") or x.get("birth_date"))
+        logger.info(f"[managers] post-dedupe with_nat={dedup_nat} with_dob={dedup_dob}")
+        counts["managers"] = db.upsert_managers(list(dedup.values()))
         # 2) mapping (player map after upsert)
         player_map = db.get_player_ids_by_sofa([p.get("sofascore_id") for p in players]) if players else {}
         manager_map = db.get_manager_ids_by_sofa([m.get("sofascore_id") for m in managers]) if managers else {}
@@ -358,7 +448,7 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
                     )
                 if not player_name:
                     player_name = ev.get("playerName") or ev.get("player_name")
-                description = ev.get("text") or ev.get("description")
+                description = ev.get("text") or ev.get("description") or event_type or "event"
                 team_side = ev.get("team") if isinstance(ev.get("team"), str) else None
                 if not team_side and isinstance(ev.get("isHome"), bool):
                     team_side = "home" if ev.get("isHome") else "away"
@@ -458,7 +548,11 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
                 # outcome may be under 'outcome' or 'shotType'
                 outcome = r.get("outcome") or r.get("shotType")
                 if outcome is None:
-                    drop_outcome +=1; continue
+                    # retain row with placeholder outcome instead of dropping
+                    outcome = "unknown"
+                o_raw = str(outcome).strip().lower()
+                norm_map = {"miss":"off_target","offtarget":"off_target","save":"saved","saved":"saved","block":"blocked","blocked":"blocked","post":"woodwork","woodwork":"woodwork","bar":"woodwork","crossbar":"woodwork"}
+                outcome = norm_map.get(o_raw, o_raw or "unknown")
                 assist_src = r.get("assist_player_sofascore_id")
                 assist_id = player_map.get(assist_src) if assist_src is not None else None
                 side = r.get("team")
@@ -473,7 +567,6 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
                     "player_id": player_id,
                     "assist_player_id": assist_id,
                     "minute": minute,
-                    "second": second_val,
                     "x": x,
                     "y": y,
                     "xg": r.get("xg"),
@@ -551,7 +644,6 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
                             "player_id": player_id,
                             "assist_player_id": assist_id,
                             "minute": minute,
-                            "second": r.get("second"),
                             "x": x,
                             "y": y,
                             "xg": r.get("xg"),
@@ -593,9 +685,43 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
         if "shots" in counts:
             logger.debug(f"[shots] early block saved={counts['shots']}")
 
-    # 5e) player_stats (strip unsupported card columns proactively)
+    # 5e) player_stats (now also carries touches & minutes)
+        # --- Fallback sources prep (average_positions + shots) before building rows ---
+        ap_touch_map: dict[tuple[int,int], dict[str, any]] = {}
+        for ap in bundle.get("average_positions", []) or []:
+            try:
+                eid_ap = ap.get("source_event_id")
+                pid_ap = ap.get("player_sofascore_id")
+                if eid_ap is None or pid_ap is None:
+                    continue
+                t_ap = ap.get("touches")
+                m_ap = ap.get("minutes_played")
+                if t_ap is not None or m_ap is not None:
+                    ap_touch_map[(int(eid_ap), int(pid_ap))] = {"touches": t_ap, "minutes_played": m_ap}
+            except Exception:
+                continue
+        shot_agg: dict[tuple[int,int], dict[str,int]] = {}
+        for sh in bundle.get("shots", []) or []:
+            try:
+                eid_sh = sh.get("source_event_id")
+                pid_sh = sh.get("player_sofascore_id")
+                if eid_sh is None or pid_sh is None:
+                    continue
+                key = (int(eid_sh), int(pid_sh))
+                agg = shot_agg.setdefault(key, {"total":0, "on_target":0})
+                agg["total"] += 1
+                outcome = (sh.get("outcome") or "").lower()
+                # Treat goal/saved/blocked/woodwork as on_target family (exclude off_target/unknown)
+                if outcome in {"goal","saved","blocked","woodwork"}:
+                    agg["on_target"] += 1
+            except Exception:
+                continue
+        fallback_touches = fallback_minutes = fallback_shots_total = fallback_shots_on_target = 0
         ps_rows = []
-        for r in bundle.get("player_stats", []) or []:
+        # map for later enrichment of average_positions ( (match_id, player_id) -> minutes_played )
+    ps_minutes_map: dict[tuple[str, str], int] = {}
+    subs_index = bundle.get("_subs_index") or {}
+    for r in bundle.get("player_stats", []) or []:
             eid = r.get("source_event_id")
             mid = se_to_mid.get(eid)
             if not mid:
@@ -608,13 +734,154 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
                 team_id = (side_team_cache.get(str(eid)) or {}).get(side)
             if not (mid and player_id):
                 continue
-            row = {k: v for k, v in r.items() if k in {"goals","assists","shots","passes","tackles","rating","minutes_played","is_substitute","was_subbed_in","was_subbed_out"}}
+            # --- Extract stats with synonym mapping ---
+            # Source payloads are inconsistent; unify into our canonical columns.
+            synonyms = {
+                # canonical : list of possible source keys (legacy plain 'shots' više ne kopiramo u zasebnu kolonu)
+                "shots_total": ["shots_total", "shotsTotal", "totalShots"],
+                "shots_on_target": ["shots_on_target", "shotsOnTarget", "onTargetShots", "shotsOn" ],
+                "rating": ["rating", "sofascore_rating", "playerRating", "sofaScoreRating"],
+                "touches": ["touches", "touchesCount", "count"],
+                "minutes_played": ["minutes_played", "minutesPlayed", "minutes"],
+            }
+            def pull(key: str) -> Any:
+                # direct field or nested statistics/stats blocks
+                for source_key in synonyms.get(key, [key]):
+                    if source_key in r and r.get(source_key) not in (None, ""):
+                        return r.get(source_key)
+                # nested search
+                for nest_key in ("statistics", "stats"):
+                    node = r.get(nest_key)
+                    if isinstance(node, dict):
+                        for source_key in synonyms.get(key, [key]):
+                            if source_key in node and node.get(source_key) not in (None, ""):
+                                return node.get(source_key)
+                return None
+            # extract touches & minutes variants (legacy code path) – now replaced by generic pull()
+            touches_val = r.get("touches")
+            if touches_val is None:
+                for nest_key in ("statistics", "stats"):
+                    node = r.get(nest_key)
+                    if isinstance(node, dict):
+                        touches_val = node.get("touches") or node.get("touchesCount") or node.get("count") or touches_val
+                    if touches_val is not None:
+                        break
+            minutes_val = r.get("minutes_played")
+            if minutes_val is None:
+                for nest_key in ("statistics", "stats"):
+                    node = r.get(nest_key)
+                    if isinstance(node, dict):
+                        minutes_val = node.get("minutes_played") or node.get("minutesPlayed") or node.get("minutes") or minutes_val
+                    if minutes_val is not None:
+                        break
+            # Build base row from a whitelist (legacy kolona 'shots' uklonjena – koristimo shots_total / shots_on_target)
+            base_keys = {"goals","assists","passes","tackles","rating","minutes_played","is_substitute","was_subbed_in","was_subbed_out","shots_total","shots_on_target","touches"}
+            row = {k: v for k, v in r.items() if k in base_keys}
+            # Enrich / override with synonym extracted values
+            st = pull("shots_total")
+            if st is not None: row["shots_total"] = st
+            sot = pull("shots_on_target")
+            if sot is not None: row["shots_on_target"] = sot
+            rat = pull("rating")
+            if rat is not None: row["rating"] = rat
+            if touches_val is None:
+                touches_val = pull("touches")
+            if touches_val is not None:
+                row["touches"] = touches_val
+            if minutes_val is not None:
+                row["minutes_played"] = minutes_val
+            # --- Integrate substitution timing to refine minutes ---
+            try:
+                if eid is not None and pid is not None:
+                    sub_key = (int(eid), int(pid))
+                    sub_info = subs_index.get(sub_key)
+                    if sub_info:
+                        in_min = sub_info.get("in_minute")
+                        out_min = sub_info.get("out_minute")
+                        # Mark flags
+                        if in_min is not None:
+                            row["was_subbed_in"] = True
+                        if out_min is not None:
+                            row["was_subbed_out"] = True
+                        # Adjust minutes_played if we have bounds
+                        # Assume match regulation length 90; if both present: minutes = out_min - in_min
+                        # If only out_min: minutes = out_min (player started until subbed) unless shorter existing value
+                        # If only in_min: minutes = 90 - in_min (played remaining) unless shorter existing value
+                        existing_min = None
+                        try:
+                            existing_min = int(row.get("minutes_played")) if row.get("minutes_played") not in (None, "") else None
+                        except Exception:
+                            existing_min = None
+                        if in_min is not None and out_min is not None and out_min >= in_min:
+                            calc = out_min - in_min
+                            if existing_min is None or abs(calc - existing_min) > 2:  # overwrite if large discrepancy
+                                row["minutes_played"] = calc
+                        elif in_min is not None and out_min is None:
+                            calc = 90 - in_min if in_min <= 90 else max(0, 120 - in_min)
+                            if existing_min is None or existing_min > calc:
+                                row["minutes_played"] = calc
+                        elif out_min is not None and in_min is None:
+                            calc = out_min if out_min <= 120 else 90
+                            if existing_min is None or existing_min > calc:
+                                row["minutes_played"] = calc
+            except Exception:
+                pass
+            # --- Fallback from average_positions (touches/minutes) ---
+            try:
+                ap_key = (int(eid), int(pid)) if (eid is not None and pid is not None) else None
+                if ap_key and row.get("touches") is None:
+                    ap_src = ap_touch_map.get(ap_key)
+                    if ap_src and ap_src.get("touches") is not None:
+                        row["touches"] = ap_src.get("touches")
+                        fallback_touches += 1
+                if ap_key and row.get("minutes_played") is None:
+                    ap_src = ap_touch_map.get(ap_key)
+                    if ap_src and ap_src.get("minutes_played") is not None:
+                        row["minutes_played"] = ap_src.get("minutes_played")
+                        fallback_minutes += 1
+            except Exception:
+                pass
+            # --- Fallback from shots aggregation (shots_total / shots_on_target) ---
+            try:
+                sh_key = (int(eid), int(pid)) if (eid is not None and pid is not None) else None
+                if sh_key and row.get("shots_total") is None:
+                    agg = shot_agg.get(sh_key)
+                    if agg and agg.get("total"):
+                        row["shots_total"] = agg["total"]
+                        fallback_shots_total += 1
+                if sh_key and row.get("shots_on_target") is None:
+                    agg = shot_agg.get(sh_key)
+                    if agg and agg.get("on_target") is not None:
+                        row["shots_on_target"] = agg["on_target"]
+                        fallback_shots_on_target += 1
+            except Exception:
+                pass
             row.update({"match_id": mid, "player_id": player_id, "team_id": team_id})
             ps_rows.append(row)
-        if ps_rows:
-            counts["player_stats"] = db.upsert_player_stats(ps_rows)
+            if row.get("minutes_played") is not None:
+                ps_minutes_map[(mid, player_id)] = row["minutes_played"]
+    # END for each player_stats row
+    if ps_rows:
+        # quick diagnostic counts once
+        _c_rating = sum(1 for x in ps_rows if x.get("rating") is not None)
+        _c_minutes = sum(1 for x in ps_rows if x.get("minutes_played") is not None)
+        _c_st = sum(1 for x in ps_rows if x.get("shots_total") is not None)
+        _c_sot = sum(1 for x in ps_rows if x.get("shots_on_target") is not None)
+        _c_touch = sum(1 for x in ps_rows if x.get("touches") is not None)
+        total_ps = len(ps_rows) or 1
+        logger.info(
+            "[player_stats] rows=%d rating=%d(%.1f%%) minutes=%d(%.1f%%)+fb(%d) shots_total=%d(%.1f%%)+fb(%d) shots_on_target=%d(%.1f%%)+fb(%d) touches=%d(%.1f%%)+fb(%d)" % (
+                len(ps_rows),
+                _c_rating, (_c_rating/total_ps)*100,
+                _c_minutes, (_c_minutes/total_ps)*100, fallback_minutes,
+                _c_st, (_c_st/total_ps)*100, fallback_shots_total,
+                _c_sot, (_c_sot/total_ps)*100, fallback_shots_on_target,
+                _c_touch, (_c_touch/total_ps)*100, fallback_touches,
+            )
+        )
+        counts["player_stats"] = db.upsert_player_stats(ps_rows)
 
-    # 5f) standings (competition/team seasonal table)
+        # 5f) standings (competition/team seasonal table)
         st_rows = []
         for r in bundle.get("standings", []) or []:
             comp_sofa = r.get("competition_sofascore_id")
@@ -661,9 +928,7 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
         if mm_rows:
             counts["match_managers"] = db.upsert_match_managers(mm_rows)
 
-    # (Removed duplicate shots processing block)
-
-        # 5i) average_positions
+        # 5i) average_positions (schema now only x,y without touches/minutes)
         ap_rows = []
         dropped_ap_no_mid = dropped_ap_no_player = dropped_ap_no_xy = 0
         for r in bundle.get("average_positions", []) or []:
@@ -687,25 +952,17 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
                 "team_id": team_id,
                 "avg_x": x,
                 "avg_y": y,
-                "touches": r.get("touches"),
-                "minutes_played": r.get("minutes_played"),
             })
         if ap_rows:
             counts["average_positions"] = db.upsert_average_positions(ap_rows)
-            # presence counters
-            ap_touch_present = sum(1 for r in ap_rows if r.get("touches") is not None)
-            ap_minutes_present = sum(1 for r in ap_rows if r.get("minutes_played") is not None)
             if dropped_ap_no_mid or dropped_ap_no_player or dropped_ap_no_xy:
                 logger.debug(
-                    f"[average_positions] kept={len(ap_rows)} drop_no_mid={dropped_ap_no_mid} drop_no_player={dropped_ap_no_player} "
-                    f"drop_no_xy={dropped_ap_no_xy} touches_present={ap_touch_present}/{len(ap_rows)} minutes_present={ap_minutes_present}/{len(ap_rows)}"
+                    f"[average_positions] kept={len(ap_rows)} drop_no_mid={dropped_ap_no_mid} drop_no_player={dropped_ap_no_player} drop_no_xy={dropped_ap_no_xy}"
                 )
         else:
             if dropped_ap_no_mid or dropped_ap_no_player or dropped_ap_no_xy:
                 logger.debug(f"[average_positions] all dropped no_mid={dropped_ap_no_mid} no_player={dropped_ap_no_player} no_xy={dropped_ap_no_xy}")
-
-    except Exception as e:
-        logger.error(f"Storage phase failed: {e}")
+    # (Removed broad try/except to surface errors earlier; handle specific failures at finer granularity above.)
 
     # Convert (ok, fail) tuples to just ok counts for summary
     flat_counts = {k: (v[0] if isinstance(v, tuple) else v) for k, v in counts.items()}
@@ -716,8 +973,26 @@ try:
 except Exception:  # pragma: no cover
     tqdm = None  # fallback if tqdm not installed
 
-def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, show_progress: bool = True) -> None:
-    logger.info(f"📅 Dump range: {start.date()} → {end.date()} (dry_run={dry_run}, throttle={throttle}s)")
+def run(
+    start: datetime,
+    end: datetime,
+    dry_run: bool,
+    throttle: float = 0.0,
+    show_progress: bool = True,
+    max_events_per_day: int | None = None,
+    skip_player_detail: bool = False,
+    log_every: int = 50,
+) -> None:
+    """Main orchestration loop.
+
+    Added runtime controls:
+      - max_events_per_day: limit number of events processed per day (useful for quick tests)
+      - skip_player_detail: skip per-player detail endpoint (faster, fewer requests)
+      - log_every: progress log frequency while enriching events
+    """
+    logger.info(
+        f"📅 Dump range: {start.date()} → {end.date()} (dry_run={dry_run}, throttle={throttle}s, max_events_per_day={max_events_per_day}, skip_player_detail={skip_player_detail})"
+    )
 
     browser = Browser()
     processor = MatchProcessor()
@@ -825,22 +1100,131 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
             if not use_bar:
                 logger.info(f"[progress] Day {idx}/{expected_days} → {day.strftime('%Y-%m-%d')}")
             events = fetch_day(browser, day, throttle=throttle)
+            if max_events_per_day is not None and len(events) > max_events_per_day:
+                logger.info(f"[limit] trimming events {len(events)} -> {max_events_per_day} for {day.date()}")
+                events = events[:max_events_per_day]
             total_events += len(events)
             if not events:
                 continue
 
             # Enrich events (lineups/incidents/statistics)
             enriched_events = []
-            for ev in events:
+            for ev_i, ev in enumerate(events, start=1):
+                if ev_i == 1 or ev_i % max(1, log_every) == 0:
+                    logger.info(f"[enrich] {ev_i}/{len(events)} eid={ev.get('id')}")
                 enriched_events.append(enrich_event(browser, ev, throttle=throttle))
 
-            # Extract stats from enriched objects
+            # Extract stats: team stats from statistics endpoint; player stats directly from raw lineups for reliability
             for enr in enriched_events:
-                if enr.get("statistics"):
-                    stats_out = parse_event_statistics(int(enr["event_id"]), enr.get("statistics"))
-                    # Attach so MatchProcessor can ignore but we collect after
+                eid_int = int(enr.get("event_id") or 0)
+                if eid_int and enr.get("statistics"):
+                    stats_out = parse_event_statistics(eid_int, enr.get("statistics"))
                     enr["_match_stats"] = stats_out.get("match_stats")
-                    enr["_player_stats"] = stats_out.get("player_stats")
+                # Player stats: prefer direct lineups parsing (contains per‑player statistics block)
+                raw_lineups_full = enr.get("_raw_lineups")
+                if eid_int and raw_lineups_full:
+                    try:
+                        enr["_player_stats"] = stats_processor.process_player_stats(raw_lineups_full, eid_int)
+                    except Exception as _ps_ex:
+                        logger.debug(f"[player_stats][parse_fail] event={eid_int} err={_ps_ex}")
+
+            # Detailed per-player statistics fetch (event/{eventId}/player/{playerId}/statistics)
+            # Only fills missing fields; does not overwrite existing non-null values.
+            def _safe_int(v):
+                try:
+                    if v in (None, "", False):
+                        return None
+                    return int(v)
+                except Exception:
+                    return None
+            def _safe_float(v):
+                try:
+                    if v in (None, "", False):
+                        return None
+                    return float(v)
+                except Exception:
+                    return None
+            if not skip_player_detail:
+                for enr in enriched_events:
+                    eid = enr.get("event_id")
+                    if not eid:
+                        continue
+                    lu = enr.get("lineups") or {}
+                    # Collect unique player IDs from both sides
+                    player_ids: set[int] = set()
+                    for side in ("home", "away"):
+                        for pl in (lu.get(side) or []):
+                            pid = ((pl.get("player") or {}).get("id")) if isinstance(pl.get("player"), dict) else None
+                            if pid:
+                                player_ids.add(pid)
+                    if not player_ids:
+                        continue
+                    ps_list = enr.get("_player_stats") or []
+                    idx_by_pid = {r.get("player_sofascore_id"): r for r in ps_list if r.get("player_sofascore_id") is not None}
+                    for pid in player_ids:
+                        try:
+                            detail = browser.fetch_data(f"event/{eid}/player/{pid}/statistics") or {}
+                            if throttle > 0:
+                                time.sleep(throttle)
+                        except Exception as _d_ex:
+                            logger.debug(f"[player_stats][detail_fetch_fail] event={eid} player={pid} err={_d_ex}")
+                            continue
+                        if not isinstance(detail, dict):
+                            continue
+                        stat_block = detail.get("statistics") or detail
+                        if not isinstance(stat_block, dict):
+                            continue
+                        rec = idx_by_pid.get(pid)
+                        if not rec:
+                            rec = {"source": "sofascore", "source_event_id": eid, "player_sofascore_id": pid, "team": None}
+                            ps_list.append(rec)
+                            idx_by_pid[pid] = rec
+                        mapping = {
+                            "goals": ["goals"],
+                            "assists": ["assists"],
+                            "shots_total": ["totalShots", "shotsTotal", "shots"],
+                            "shots_on_target": ["shotsOnTarget", "onTargetShots"],
+                            "passes": ["totalPasses", "passes"],
+                            "tackles": ["tackles", "totalTackles"],
+                            "yellow_cards": ["yellowCards"],
+                            "red_cards": ["redCards"],
+                            "touches": ["touches", "ballTouches", "totalTouches"],
+                            "minutes_played": ["minutesPlayed", "minutes"],
+                            "rating": ["rating", "ratingNum", "playerRating"],
+                        }
+                        for field, keys in mapping.items():
+                            if field == "rating":
+                                current = rec.get("rating")
+                                if current is not None and current != 6.3:
+                                    continue
+                                new_rating = None
+                                for k in keys:
+                                    if stat_block.get(k) not in (None, ""):
+                                        try:
+                                            new_rating = float(stat_block.get(k))
+                                            break
+                                        except Exception:
+                                            pass
+                                if new_rating is not None and (current is None or current == 6.3):
+                                    rec["rating"] = new_rating
+                                continue
+                            if rec.get(field) is not None:  # preserve existing value (even 0)
+                                continue
+                            val = None
+                            for k in keys:
+                                if k in stat_block and stat_block.get(k) not in (None, ""):
+                                    val = stat_block.get(k)
+                                    break
+                            if val is None:
+                                continue
+                            casted = _safe_int(val)
+                            if casted is None:
+                                casted = _safe_float(val)
+                            if casted is not None:
+                                rec[field] = casted
+                    enr["_player_stats"] = ps_list
+            else:
+                logger.info("[player_stats] skip_player_detail=True (detail endpoint calls disabled)")
 
             # --- managers parse (simple) -> produce managers + match_managers temporary lists ---
             managers_all: List[Dict[str, Any]] = []
@@ -856,10 +1240,28 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
                 for side in ("home","away"):
                     m = mgrs.get(side) or mgrs.get(f"{side}Manager")
                     if isinstance(m, dict) and m.get("id"):
+                        # Manager enrichment
+                        nationality = None
+                        birth_date = None
+                        country_obj = m.get("country") or {}
+                        if isinstance(country_obj, dict):
+                            nationality = country_obj.get("name") or country_obj.get("alpha2")
+                        if m.get("dateOfBirth"):
+                            birth_date = m.get("dateOfBirth")
+                        elif m.get("dateOfBirthTimestamp"):
+                            try:
+                                bd_ts = int(m.get("dateOfBirthTimestamp"))
+                                if bd_ts > 10**12:
+                                    bd_ts //= 1000
+                                birth_date = datetime.utcfromtimestamp(bd_ts).strftime("%Y-%m-%d")
+                            except Exception:
+                                birth_date = None
                         managers_all.append({
                             "sofascore_id": m.get("id"),
                             "full_name": m.get("name"),
                             "team_sofascore_id": home_team_id if side=="home" else away_team_id,
+                            "nationality": nationality,
+                            "date_of_birth": birth_date,
                         })
                         match_managers_all.append({
                             "source_event_id": ev_id,
@@ -905,6 +1307,61 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
                         base_list.append(extra)
                 bundle["competitions"] = base_list
 
+            # --- Post-process substitution events to adjust player minutes & flags ---
+            # We'll attach a temporary structure on bundle to be merged during player_stats storage.
+            # Map: (event_id, player_sofa_id) -> {in_minute, out_minute}
+            subs_index: Dict[tuple[int,int], Dict[str,int]] = {}
+            for enr in enriched_events:
+                ev_id = enr.get("event_id")
+                if not ev_id:
+                    continue
+                incidents = enr.get("events") or []
+                for inc in incidents:
+                    try:
+                        raw_type = str(inc.get("type") or "").lower()
+                        if "substitution" not in raw_type:
+                            continue
+                        minute = None
+                        for k in ("minute","minutes"):
+                            if inc.get(k) is not None:
+                                minute = int(inc.get(k)); break
+                        if minute is None and isinstance(inc.get("time"), dict):
+                            t = inc.get("time")
+                            if t.get("minute") is not None:
+                                minute = int(t.get("minute"))
+                            if t.get("addMinutes") not in (None,""):
+                                try: minute += int(t.get("addMinutes"))
+                                except Exception: pass
+                        if minute is None:
+                            minute = 0
+                        pin = inc.get("playerIn") or inc.get("player_in") or inc.get("playerInPlayer") or inc.get("player")
+                        pout = inc.get("playerOut") or inc.get("player_out") or inc.get("playerOutPlayer") or inc.get("relatedPlayer")
+                        in_id = pin.get("id") if isinstance(pin, dict) else None
+                        out_id = pout.get("id") if isinstance(pout, dict) else None
+                        if in_id:
+                            key = (int(ev_id), int(in_id))
+                            entry = subs_index.setdefault(key, {})
+                            # first appearance minute for subbed in player
+                            if "in_minute" not in entry:
+                                entry["in_minute"] = minute
+                        if out_id:
+                            key2 = (int(ev_id), int(out_id))
+                            entry2 = subs_index.setdefault(key2, {})
+                            # last minute they were on pitch -> out_minute
+                            if "out_minute" not in entry2:
+                                entry2["out_minute"] = minute
+                    except Exception:
+                        continue
+            bundle["_subs_index"] = subs_index
+
+            # Inject parsed managers (including nationality & birth_date) before storage phase
+            if managers_all:
+                existing_mgr = bundle.get("managers") or []
+                bundle["managers"] = existing_mgr + managers_all
+            if match_managers_all:
+                existing_mm = bundle.get("match_managers") or []
+                bundle["match_managers"] = existing_mm + match_managers_all
+
             # Enrich teams (colors, venue, founded, logo_url) if raw available
             team_extra: Dict[int, Dict[str, Any]] = {}
             for enr in enriched_events:
@@ -945,7 +1402,7 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
                         base_list.append(extra)
                 bundle["teams"] = base_list
 
-            # Enrich players (nationality, height, age) from lineups raw
+            # Enrich players (nationality, height, date_of_birth) from lineups raw
             player_extra: Dict[int, Dict[str, Any]] = {}
             for enr in enriched_events:
                 lu = enr.get("lineups") or {}
@@ -965,8 +1422,24 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
                             pe.setdefault("nationality", country)
                         if pl.get("height"):
                             pe.setdefault("height_cm", pl.get("height"))
-                        if pl.get("age"):
-                            pe.setdefault("age", pl.get("age"))
+                        # Extract date_of_birth if provided (dateOfBirth or timestamp)
+                        dob_raw = pl.get("dateOfBirth") or pl.get("dateOfBirthTimestamp")
+                        if dob_raw:
+                            try:
+                                if isinstance(dob_raw, (int, float)):
+                                    ts = int(dob_raw)
+                                    if ts > 10**12:  # ms to s
+                                        ts //= 1000
+                                    dob_str = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+                                elif isinstance(dob_raw, str) and len(dob_raw) >= 8:
+                                    # assume already YYYY-MM-DD or similar
+                                    dob_str = dob_raw[:10]
+                                else:
+                                    dob_str = None
+                                if dob_str:
+                                    pe.setdefault("date_of_birth", dob_str)
+                            except Exception:
+                                pass
                         if side == "home" and home_tid:
                             pe.setdefault("team_sofascore_id", home_tid)
                         elif side == "away" and away_tid:
@@ -994,6 +1467,21 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
                 bundle["match_stats"] = match_stats_all
             if player_stats_all:
                 bundle["player_stats"] = player_stats_all
+            # Debug sample for player stats quality
+            if bundle.get("player_stats"):
+                _ps = bundle["player_stats"]
+                present_counts = {
+                    "rating": sum(1 for r in _ps if r.get("rating") is not None),
+                    "minutes": sum(1 for r in _ps if r.get("minutes_played") is not None),
+                    "shots_total": sum(1 for r in _ps if r.get("shots_total") is not None),
+                    "shots_on_target": sum(1 for r in _ps if r.get("shots_on_target") is not None),
+                    "touches": sum(1 for r in _ps if r.get("touches") is not None),
+                    "goals": sum(1 for r in _ps if r.get("goals") is not None),
+                    "assists": sum(1 for r in _ps if r.get("assists") is not None),
+                    "passes": sum(1 for r in _ps if r.get("passes") is not None),
+                    "tackles": sum(1 for r in _ps if r.get("tackles") is not None),
+                }
+                logger.debug(f"[player_stats][debug] rows={len(_ps)} present={present_counts} sample={ {k:v for k,v in _ps[0].items() if k in ('player_sofascore_id','minutes_played','rating','shots_total','shots_on_target','touches','goals','assists','passes','tackles')} }")
             # merge managers & match_managers
             if managers_all:
                 bundle["managers"] = (bundle.get("managers") or []) + managers_all
@@ -1032,6 +1520,7 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
             standings_rows: List[Dict[str, Any]] = []
             # --- shots parse (raw shotmap) ---
             shots_all: List[Dict[str, Any]] = []
+            _SHOT_OUTCOME_MAP = {"goal":"goal","scored":"goal","miss":"off_target","offtarget":"off_target","saved":"saved","save":"saved","blocked":"blocked","block":"blocked","post":"woodwork","woodwork":"woodwork","bar":"woodwork","crossbar":"woodwork","wide":"off_target","high":"off_target"}
             for enr in enriched_events:
                 raw_shots = enr.get("_raw_shots")
                 if not raw_shots:
@@ -1066,22 +1555,38 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
                         if minute is None:
                             t_block = s.get("time") or {}
                             if isinstance(t_block, dict):
-                                minute = t_block.get("minute")
+                                minute = t_block.get("minute") or t_block.get("minutes")
+                            elif isinstance(t_block, int):
+                                minute = t_block
+                        if minute is None:
+                            ts_val = s.get("timeSeconds")
+                            if isinstance(ts_val, (int, float)):
+                                minute = int(ts_val // 60)
+                        x_val = s.get("x") if s.get("x") is not None else (s.get("position") or {}).get("x")
+                        y_val = s.get("y") if s.get("y") is not None else (s.get("position") or {}).get("y")
+                        if (x_val is None or y_val is None) and isinstance(s.get("playerCoordinates"), dict):
+                            pc = s.get("playerCoordinates")
+                            x_val = x_val if x_val is not None else pc.get("x")
+                            y_val = y_val if y_val is not None else pc.get("y")
+                        raw_outcome = (s.get("outcome") or s.get("shotResult") or s.get("result") or "").strip().lower()
+                        canonical_outcome = _SHOT_OUTCOME_MAP.get(raw_outcome, raw_outcome or None)
+                        goal_type = s.get("goalType") or s.get("type")
+                        is_pen = bool(s.get("isPenalty") or s.get("penalty") or (s.get("situation") in ("penalty","Pen")))
+                        is_own = bool(s.get("isOwnGoal") or s.get("ownGoal") or (isinstance(goal_type, str) and "own" in goal_type.lower()))
                         shots_all.append({
                             "source_event_id": enr.get("event_id"),
                             "player_sofascore_id": player.get("id"),
                             "assist_player_sofascore_id": assist.get("id"),
                             "team": side,
                             "minute": minute,
-                            "second": s.get("second"),
-                            "x": s.get("x") if s.get("x") is not None else (s.get("position") or {}).get("x"),
-                            "y": s.get("y") if s.get("y") is not None else (s.get("position") or {}).get("y"),
+                            "x": x_val,
+                            "y": y_val,
                             "xg": s.get("xg") if s.get("xg") is not None else s.get("expectedGoals"),
                             "body_part": s.get("bodyPart"),
                             "situation": s.get("situation"),
-                            "is_penalty": s.get("isPenalty") or s.get("penalty"),
-                            "is_own_goal": s.get("isOwnGoal") or s.get("ownGoal"),
-                            "outcome": s.get("outcome") or s.get("shotResult"),
+                            "is_penalty": is_pen,
+                            "is_own_goal": is_own,
+                            "outcome": canonical_outcome,
                             "source": "sofascore",
                             "source_item_id": s.get("id") or idx,
                         })
@@ -1188,6 +1693,15 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
                         continue
                     touches = _first(item.get("touches"), item.get("touchesCount"), item.get("count"))
                     minutes_played = _first(item.get("minutes"), item.get("minutesPlayed"), item.get("mins"))
+                    # Capture shallow stats payload if present for later fallback (touches/minutes)
+                    stats_block = None
+                    for key in ("statistics","stats","playerStatistics"):
+                        if isinstance(item.get(key), dict):
+                            stats_block = item.get(key); break
+                        # sometimes inside nested player node
+                        player_node = (item.get("player") if isinstance(item.get("player"), dict) else {})
+                        if isinstance(player_node.get(key), dict):
+                            stats_block = player_node.get(key); break
                     avgpos_all.append({
                         "source_event_id": enr.get("event_id"),
                         "player_sofascore_id": pid,
@@ -1196,6 +1710,7 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
                         "avg_y": y,
                         "touches": touches,
                         "minutes_played": minutes_played,
+                        "statistics": stats_block,  # may contain touches/minutes variants
                     })
             if avgpos_all:
                 bundle["average_positions"] = avgpos_all
@@ -1274,7 +1789,7 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
             logger.info(f"[DRY] {day.date()} → bundle sizes: " +
                         ", ".join(f"{k}={len(v)}" for k, v in bundle.items()))
         else:
-            counts = store_bundle(bundle)
+            counts = store_bundle(bundle, browser=browser, throttle=throttle)
             for k, v in counts.items():
                 total_saved[k] = total_saved.get(k, 0) + (v or 0)
             logger.info("Saved: " + ", ".join(f"{k}={counts.get(k,0)}" for k in total_saved.keys()))
@@ -1298,6 +1813,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=BATCH_SIZE_DEFAULT)  # kept for compatibility
     p.add_argument("--throttle", type=float, default=0.0, help="Seconds sleep after each API call (rate limiting)")
     p.add_argument("--no-progress", action="store_true", help="Disable tqdm progress bar output")
+    p.add_argument("--max-events-per-day", type=int, default=None, help="Process only first N events per day (speed/testing)")
+    p.add_argument("--skip-player-detail", action="store_true", help="Skip per-player detail statistics endpoint (faster)")
+    p.add_argument("--log-every", type=int, default=50, help="Log enrichment progress every N events")
     return p.parse_args()
 
 def main():
@@ -1318,7 +1836,16 @@ def main():
             end = (start + timedelta(days=args.limit_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
         # run (cleanup handled inside run())
-        run(start, end, dry_run=args.dry_run, throttle=args.throttle, show_progress=not args.no_progress)
+        run(
+            start,
+            end,
+            dry_run=args.dry_run,
+            throttle=args.throttle,
+            show_progress=not args.no_progress,
+            max_events_per_day=args.max_events_per_day,
+            skip_player_detail=args.skip_player_detail,
+            log_every=args.log_every,
+        )
 
 if __name__ == "__main__":
     main()

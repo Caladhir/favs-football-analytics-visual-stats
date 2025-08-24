@@ -1,4 +1,4 @@
-# scraper/legacy/init_match_dataset.py - Bulk init dataset (2y back + 1y fwd) or custom range
+# scraper/init_match_dataset.py - Bulk init dataset (2y back + 1y fwd) or custom range
 from __future__ import annotations
 
 import sys
@@ -494,7 +494,6 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
                     "player_id": player_id,
                     "assist_player_id": assist_id,
                     "minute": minute,
-                    "second": second_val,
                     "x": x,
                     "y": y,
                     "xg": r.get("xg"),
@@ -592,7 +591,6 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
                                 "player_id": player_id,
                                 "assist_player_id": assist_id,
                                 "minute": minute,
-                                "second": r.get("second"),
                                 "x": x,
                                 "y": y,
                                 "xg": r.get("xg"),
@@ -1131,9 +1129,7 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
                         if isinstance(minute, dict):
                             minute = minute.get("minute")
                         time_seconds = s.get("timeSeconds")
-                        second_val = s.get("second")
-                        if second_val is None and isinstance(time_seconds, (int, float)):
-                            second_val = int(time_seconds % 60)
+                        # drop per-second precision
                         # coordinates: prefer playerCoordinates
                         x = s.get("x")
                         y = s.get("y")
@@ -1173,8 +1169,7 @@ def run(start: datetime, end: datetime, dry_run: bool, throttle: float = 0.0, sh
                             "team": side,
                             "isHome": s.get("isHome"),
                             "minute": minute,
-                            "second": second_val,
-                            "timeSeconds": time_seconds,
+                            "timeSeconds": time_seconds,  # kept only for potential future derivations (not persisted)
                             "x": x,
                             "y": y,
                             "xg": s.get("xg") if s.get("xg") is not None else s.get("expectedGoals"),
