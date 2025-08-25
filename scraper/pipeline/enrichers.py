@@ -60,6 +60,14 @@ def enrich_event(browser: Any, event: Dict[str, Any], throttle: float = 0.0) -> 
                     "onTargetScoringAttempt","totalPass","totalTackle","touches"
                 ]
                 filtered = {k: stats_node.get(k) for k in subset_keys if k in stats_node}
+                # Propagate DOB timestamp to player node if available (needed for players.date_of_birth)
+                try:
+                    if "dateOfBirthTimestamp" in stats_node and isinstance(pl_node.get("player"), dict):
+                        pl_player = pl_node.get("player")
+                        if pl_player.get("dateOfBirthTimestamp") in (None, ""):
+                            pl_player["dateOfBirthTimestamp"] = stats_node.get("dateOfBirthTimestamp")
+                except Exception:
+                    pass
                 # Normalisations (mirror old logic but confined to new dict)
                 if "goalAssist" in filtered and "assists" not in filtered:
                     filtered["assists"] = filtered.get("goalAssist")
@@ -100,7 +108,8 @@ def enrich_event(browser: Any, event: Dict[str, Any], throttle: float = 0.0) -> 
                 except Exception as ex:
                     logger.debug(f"[enrich_player_stat_fetch_fail] ev={ev_id} pid={player_id} err={ex}")
                 return {}
-            use_direct = True  # always on per user request to "samo prihvati od apija"
+            # Env flag to allow toggling direct fetch (default on). Set PLAYER_STATS_DIRECT=0 to disable.
+            use_direct = os.getenv("PLAYER_STATS_DIRECT", "1") not in {"0", "false", "False"}
             for pid in pid_set:
                 if use_direct:
                     stats_block = _direct_player_stats(eid, pid)

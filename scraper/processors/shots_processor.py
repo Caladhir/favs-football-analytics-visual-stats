@@ -17,7 +17,7 @@ class ShotsProcessor:
         elif isinstance(raw, dict):
             items = raw.get("shotmap") or raw.get("shots") or []
         out: List[Dict[str, Any]] = []
-        for s in items:
+        for idx, s in enumerate(items):
             if not isinstance(s, dict):
                 continue
             player_obj = s.get("player") or {}
@@ -28,14 +28,42 @@ class ShotsProcessor:
                 pid = int(pid)
             except Exception:
                 continue
-            # assist
-            assist_id: Optional[int] = None
+            # shot unique id from provider (fallback to loop index if absent)
+            source_item_id: Optional[int] = None
             try:
-                assist_id = (s.get("assist") or {}).get("id")
-                if assist_id is not None:
-                    assist_id = int(assist_id)
+                raw_sid = s.get("id")
+                if raw_sid is not None:
+                    source_item_id = int(raw_sid)
             except Exception:
-                assist_id = None
+                source_item_id = None
+            if source_item_id is None:
+                source_item_id = idx  # 0-based fallback (legacy copy script used same convention)
+            # assist (razni mogući ključevi u raw payloadu)
+            assist_id: Optional[int] = None
+            assist_obj_keys = ("assist","assist1","goalAssist","assistPlayer","lastAssist","playerAssist","assist_player","primaryAssist")
+            for ak in assist_obj_keys:
+                if assist_id is not None:
+                    break
+                try:
+                    ao = s.get(ak)
+                    # dict with id
+                    if isinstance(ao, dict) and ao.get("id") is not None:
+                        assist_id = int(ao.get("id"))
+                    # direct scalar id (int/str)
+                    elif isinstance(ao, (int, str)) and str(ao).strip():
+                        assist_id = int(str(ao).strip())
+                except Exception:
+                    continue
+            if assist_id is None:
+                # direct scalar id fields (alternative naming)
+                for dk in ("assistPlayerId","assistId","assist_player_id","goalAssistId"):
+                    try:
+                        v = s.get(dk)
+                        if v is not None and str(v).strip():
+                            assist_id = int(str(v).strip())
+                            break
+                    except Exception:
+                        continue
             minute = s.get("time") or s.get("minute")
             # 'second' column removed from DB; ignore any sub-minute precision fields
             try:
@@ -44,8 +72,13 @@ class ShotsProcessor:
             except Exception:
                 minute = None
             # we no longer store per-second precision
-            x = s.get("x") or (s.get("playerCoordinates") or {}).get("x") or (s.get("draw") or {}).get("x")
-            y = s.get("y") or (s.get("playerCoordinates") or {}).get("y") or (s.get("draw") or {}).get("y")
+            # Coordinate extraction with multiple fallbacks (provider schema variance)
+            pc = s.get("playerCoordinates") or {}
+            goal_shot_coords = s.get("goalShotCoordinates") or {}
+            goal_mouth_coords = s.get("goalMouthCoordinates") or {}
+            draw_obj = s.get("draw") or {}
+            x = (s.get("x") or pc.get("x") or goal_shot_coords.get("x") or goal_mouth_coords.get("x") or draw_obj.get("x"))
+            y = (s.get("y") or pc.get("y") or goal_shot_coords.get("y") or goal_mouth_coords.get("y") or draw_obj.get("y"))
             try:
                 if x is not None:
                     x = float(x)
@@ -99,7 +132,22 @@ class ShotsProcessor:
                 "team": side,
                 # Preserve raw isHome if present for fallback mapping in legacy transform
                 "isHome": s.get("isHome") if isinstance(s.get("isHome"), bool) else None,
+                "source_item_id": source_item_id,
             }
+            # ako je situation=assisted a nemamo assist_id, dodaj male debug info (privremeno)
+            try:
+                if row.get("situation") == "assisted" and row.get("assist_player_sofascore_id") is None:
+                    assist_keys = [k for k in s.keys() if "assist" in k.lower()]
+                    if assist_keys:
+                        row["_assist_debug_keys"] = ",".join(assist_keys[:5])
+            except Exception:
+                pass
+            # Quick debug for goals/assisted where coords or minute missing (helps explain dropped rows later)
+            try:
+                if row.get("outcome") == "goal" and (row.get("x") is None or row.get("y") is None or row.get("minute") is None):
+                    row.setdefault("_coord_debug","missing_key")
+            except Exception:
+                pass
             out.append(row)
         return out
 

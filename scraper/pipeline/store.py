@@ -84,13 +84,60 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
         # normalise birth_date -> date_of_birth if present
         if p2.get("birth_date") and not p2.get("date_of_birth"):
             p2["date_of_birth"] = p2.pop("birth_date")
+        # NEW: fallback – ako imamo timestamp a nema date_of_birth, konvertiraj
+        if not p2.get("date_of_birth"):
+            ts_raw = p2.get("dateOfBirthTimestamp") or p2.get("birthDateTimestamp")
+            if ts_raw:
+                try:
+                    ts_int = int(ts_raw)
+                    if ts_int > 10**12:  # ms -> s
+                        ts_int //= 1000
+                    from datetime import datetime, timezone, timedelta
+                    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+                    dob_dt = epoch + timedelta(seconds=ts_int)
+                    dob_str = dob_dt.date().isoformat()
+                    p2["date_of_birth"] = dob_str
+                    # označi iz kojeg je izvora došao (debug) ako već nemamo _dob_src
+                    p2.setdefault("_dob_src", "ts_fallback")
+                except Exception:
+                    pass
         tsid = p2.pop("team_sofascore_id", None)
-        if tsid is not None and tsid in team_map and not p2.get("team_id"):
+        # If legacy parse incorrectly set numeric team_id (sofascore) instead of FK UUID, remap
+        raw_team_id = p2.get("team_id")
+        if tsid is not None and tsid in team_map:
             p2["team_id"] = team_map.get(tsid)
+        elif isinstance(raw_team_id, int) and raw_team_id in team_map:
+            p2["team_id"] = team_map.get(raw_team_id)
         players.append(p2)
     if players:
         if browser is not None:
             enrich_player_details(browser, players, throttle=throttle)
+            # Post-enrichment safety: još jednom konvertiraj raw timestamp ako je ostao
+            for pl in players:
+                if not pl.get("date_of_birth"):
+                    ts_raw = pl.get("dateOfBirthTimestamp") or pl.get("birthDateTimestamp")
+                    if ts_raw:
+                        try:
+                            ts_int = int(ts_raw)
+                            if ts_int > 10**12:
+                                ts_int //= 1000
+                            from datetime import datetime, timezone as _tz
+                            pl["date_of_birth"] = datetime.utcfromtimestamp(ts_int).replace(tzinfo=_tz.utc).date().isoformat()
+                        except Exception:
+                            pass
+        # Debug: log sample of player DOB fields coverage
+        try:
+            dob_total = sum(1 for x in players if x.get("date_of_birth"))
+            dob_ts_fallback = sum(1 for x in players if (not x.get("date_of_birth")) and x.get("dateOfBirthTimestamp"))
+            dob_src_stats = sum(1 for x in players if x.get("_dob_src") == "stats_ts")
+            sample = [{k: players[i].get(k) for k in ("sofascore_id","date_of_birth","full_name","_dob_src","dateOfBirthTimestamp")}
+                      for i in range(min(2, len(players)))]
+            # strip debug keys before upsert
+            for x in players:
+                x.pop("_dob_src", None)
+            logger.info(f"[players][pre_upsert] count={len(players)} dob_present={dob_total} raw_ts_no_date={dob_ts_fallback} via_stats_ts={dob_src_stats} sample={sample}")
+        except Exception:
+            pass
         counts["players"] = db.upsert_players(players)
 
     # 3) Managers (enrich + dedupe) -----------------------------------------
@@ -237,6 +284,84 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
 
     # 9) Shots --------------------------------------------------------------
     sh_rows: List[Dict[str, Any]] = []
+    _sid_missing = 0
+    _sid_present = 0
+    # Collect raw shot rows first to inspect missing player mappings
+    raw_shots_bundle = bundle.get("shots", []) or []
+    # Detect player IDs in shots that are not yet in player_map
+    missing_shot_pids: List[int] = []
+    try:
+        existing_pids_set = set(player_map.keys())
+        for r in raw_shots_bundle:
+            psid = r.get("player_sofascore_id")
+            if psid and isinstance(psid, int) and psid not in existing_pids_set:
+                missing_shot_pids.append(psid)
+    except Exception:
+        missing_shot_pids = []
+    missing_shot_pids = sorted(set(missing_shot_pids))
+    # Attempt on-the-fly enrichment for missing shot players (placeholder players) ONLY if browser provided
+    if missing_shot_pids and browser is not None:
+        placeholder_players: List[Dict[str, Any]] = []
+        for pid in missing_shot_pids:
+            try:
+                detail = browser.fetch_data(f"player/{pid}") or {}
+                pobj = detail.get("player") if isinstance(detail, dict) else detail
+                if isinstance(pobj, dict):
+                    placeholder_players.append({
+                        "sofascore_id": pid,
+                        "full_name": pobj.get("name") or pobj.get("shortName") or f"Player {pid}",
+                        "position": (pobj.get("position") or "?")[:3],
+                        # team_id left blank; may backfill later via other occurrences
+                    })
+                else:
+                    placeholder_players.append({
+                        "sofascore_id": pid,
+                        "full_name": f"Player {pid}",
+                        "position": None,
+                    })
+            except Exception:
+                placeholder_players.append({
+                    "sofascore_id": pid,
+                    "full_name": f"Player {pid}",
+                    "position": None,
+                })
+        if placeholder_players:
+            try:
+                logger.info(f"[store][shots] enriching missing shot players count={len(placeholder_players)} pids={missing_shot_pids[:8]}")
+                db.upsert_players(placeholder_players)
+                # refresh player_map with new inserts
+                try:
+                    player_map = db.get_player_ids_by_sofa([p.get("sofascore_id") for p in bundle.get("players", [])] + missing_shot_pids)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+    # Assist fallback maps (build once from events)
+    assist_by_min_scorer: Dict[tuple, int] = {}
+    assist_by_scorer_only: Dict[int, int] = {}
+    try:
+        event_goal_assists = [er for er in bundle.get("events", []) if er.get("event_type") in {"goal","own_goal"}]
+        scorer_goal_minutes: Dict[int, List[int]] = {}
+        scorer_assist_candidates: Dict[int, List[int]] = {}
+        for er in event_goal_assists:
+            sp = er.get("player_sofascore_id")
+            ap = er.get("assist_player_sofascore_id")
+            mn = er.get("minute")
+            if sp and mn is not None and ap:
+                try:
+                    key = (int(mn), int(sp))
+                    assist_by_min_scorer.setdefault(key, int(ap))
+                    scorer_goal_minutes.setdefault(int(sp), []).append(int(mn))
+                    scorer_assist_candidates.setdefault(int(sp), []).append(int(ap))
+                except Exception:
+                    pass
+        # If scorer has exactly one assist candidate across their goals, keep a scorer-only fallback
+        for sp, assists in scorer_assist_candidates.items():
+            uniq = sorted(set(a for a in assists if a))
+            if len(uniq) == 1:
+                assist_by_scorer_only[sp] = uniq[0]
+    except Exception:
+        pass
     for r in bundle.get("shots", []) or []:
         eid = r.get("source_event_id")
         mid = se_to_mid.get(eid)
@@ -257,8 +382,49 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
         apid = sr.pop("assist_player_sofascore_id", None)
         if apid and apid in player_map:
             sr["assist_player_id"] = player_map[apid]
+        # Legacy/key variance: ako ShotsProcessor stavlja assist_player_sofascore_id u drugom ključu
+        if not sr.get("assist_player_id") and sr.get("assistPlayerSofascoreId") in player_map:
+            try:
+                sr["assist_player_id"] = player_map[sr.get("assistPlayerSofascoreId")]
+            except Exception:
+                pass
+        # Goal assist fallback: if goal and still missing assist, try minute+scorer match first
+        try:
+            if sr.get("outcome") == "goal" and not sr.get("assist_player_id") and pid:
+                mn = r.get("minute")
+                if mn is not None:
+                    ap_fallback = assist_by_min_scorer.get((int(mn), int(pid)))
+                    if not ap_fallback:
+                        # +/-1..3 fuzzy search
+                        for delta in (1,-1,2,-2,3,-3):
+                            ap_fallback = assist_by_min_scorer.get((int(mn)+delta, int(pid)))
+                            if ap_fallback:
+                                break
+                    if not ap_fallback:
+                        ap_fallback = assist_by_scorer_only.get(int(pid))
+                    if ap_fallback and ap_fallback in player_map:
+                        sr["assist_player_id"] = player_map[ap_fallback]
+        except Exception:
+            pass
+        # ensure source_item_id exists (ShotsProcessor should set it; fallback if absent)
+        if "source_item_id" not in sr or sr.get("source_item_id") is None:
+            _sid_missing += 1
+            # deterministic fallback: enumerate current length for uniqueness within batch
+            sr["source_item_id"] = len(sh_rows)
+        else:
+            _sid_present += 1
         sh_rows.append(sr)
     if sh_rows:
+        try:
+            # Pre-log drop risk counts (player_id or coords/minute missing)
+            risk_missing_player = sum(1 for x in sh_rows if not x.get("player_id"))
+            risk_missing_minute = sum(1 for x in sh_rows if x.get("minute") is None)
+            risk_missing_xy = sum(1 for x in sh_rows if x.get("x") is None or x.get("y") is None)
+            logger.info(
+                f"[store][shots] prepared rows={len(sh_rows)} source_item_id_present={_sid_present} missing_filled={_sid_missing} risk_missing_player={risk_missing_player} risk_missing_minute={risk_missing_minute} risk_missing_xy={risk_missing_xy} enriched_missing_players={len(missing_shot_pids)}"
+            )
+        except Exception:
+            pass
         counts["shots"] = db.upsert_shots(sh_rows)
 
     # 10) Average positions -------------------------------------------------

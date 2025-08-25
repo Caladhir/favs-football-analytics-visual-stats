@@ -78,33 +78,63 @@ class TeamProcessor:
         return teams
 
     def parse_players(self, enriched: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract distinct players with team_id and date_of_birth (year derivable downstream).
+
+        - team_id: mapped from side (home/away) team sofascore id.
+        - date_of_birth: raw YYYY-MM-DD string (DB cleaner will shrink to year).
+        """
         out: Dict[int, Dict[str, Any]] = {}
         lu = enriched.get("lineups") or {}
+        # Determine team ids for sides
+        home_tid = enriched.get("home_team_sofa") or ((enriched.get("event") or {}).get("homeTeam") or {}).get("id")
+        away_tid = enriched.get("away_team_sofa") or ((enriched.get("event") or {}).get("awayTeam") or {}).get("id")
+        side_team_map = {"home": home_tid, "away": away_tid}
         for side in ("home", "away"):
+            tid = side_team_map.get(side)
             for p in lu.get(side, []) or []:
                 pl = p.get("player") or {}
                 pid = pl.get("id")
                 if not pid:
                     continue
-                # Birth date (if provided directly in lineup payload)
-                birth_date = None
+                # Debug: if DOB ts present, mark in temp flag for logging (removed before return)
+                dob_debug_flag = True if pl.get("dateOfBirthTimestamp") else False
+                dob_str = None
                 dob_ts = pl.get("dateOfBirthTimestamp") or pl.get("dateOfBirth")
                 if dob_ts:
                     try:
                         val = int(dob_ts)
                         if val > 10**12:  # ms -> s
                             val //= 1000
-                        from datetime import datetime
-                        birth_date = datetime.utcfromtimestamp(val).strftime("%Y-%m-%d")
+                        from datetime import datetime, timezone, timedelta
+                        epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+                        dob_dt = epoch + timedelta(seconds=val)
+                        dob_str = dob_dt.date().isoformat()
                     except Exception:
-                        birth_date = None
-                out[int(pid)] = {
+                        dob_str = None
+                # merge if existing (prefer earliest non-null fields)
+                row = out.get(int(pid), {})
+                row.update({
                     "sofascore_id": int(pid),
-                    "full_name": pl.get("name"),
-                    "number": p.get("jerseyNumber"),
-                    "position": p.get("position"),
-                    "birth_date": birth_date,
-                }
+                    "full_name": row.get("full_name") or pl.get("name"),
+                    "number": row.get("number") or p.get("jerseyNumber"),
+                    "position": row.get("position") or p.get("position"),
+                })
+                if tid and row.get("team_sofascore_id") is None:
+                    try:
+                        row["team_sofascore_id"] = int(tid)
+                    except Exception:
+                        pass
+                if dob_str and row.get("date_of_birth") is None:
+                    row["date_of_birth"] = dob_str
+                elif not dob_str and dob_ts and row.get("date_of_birth") is None and "dateOfBirthTimestamp" not in row:
+                    # retain raw ts for fallback conversion in store.py (only if conversion failed)
+                    try:
+                        row["dateOfBirthTimestamp"] = int(dob_ts)
+                    except Exception:
+                        pass
+                if dob_debug_flag:
+                    row.setdefault("_dob_src", "stats_ts")
+                out[int(pid)] = row
         return list(out.values())
 
     def parse_lineups(self, enriched: Dict[str, Any]) -> List[Dict[str, Any]]:

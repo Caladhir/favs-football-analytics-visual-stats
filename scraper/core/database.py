@@ -210,6 +210,11 @@ def _clean_rows(table: str, rows: Iterable[Dict[str, Any]]) -> List[Dict[str, An
     int_fields = _INT_FIELDS.get(table, set())
     float_fields = _FLOAT_FIELDS.get(table, set())
     out = []
+    # Diagnostic accumulators (only used for players DOB troubleshooting)
+    dob_dropped: int = 0
+    dob_seen: int = 0
+    dob_samples_dropped: list[str] = []
+    dob_samples_kept: list[str] = []
     for r in rows:
         if not isinstance(r, dict):
             continue
@@ -237,38 +242,54 @@ def _clean_rows(table: str, rows: Iterable[Dict[str, Any]]) -> List[Dict[str, An
                     except Exception:
                         v = None
             elif table == "players" and k == "date_of_birth" and v is not None:
-                # DB column is integer (year). Accept YYYY, YYYY-MM-DD, or timestamp.
+                # Novi tip u bazi je DATE: zadrži puni datum 'YYYY-MM-DD'.
                 try:
+                    raw_original = v
+                    from datetime import datetime as _dt
+                    iso_str: str | None = None
                     if isinstance(v, (int, float)):
-                        # treat as epoch seconds -> extract year if plausible range
+                        # epoch (s ili ms) -> ISO date
                         ts = int(v)
-                        if ts > 10**8 or ts < -10**8:  # looks like epoch
-                            from datetime import datetime
-                            v = datetime.utcfromtimestamp(ts).year
+                        if abs(ts) > 10**10:  # ms
+                            ts //= 1000
+                        if abs(ts) > 10**5:  # tretiraj kao epoch sekunde
+                            try:
+                                iso_str = _dt.utcfromtimestamp(ts).date().isoformat()
+                            except Exception:
+                                iso_str = None
                         else:
-                            # already maybe a year number
-                            v = int(str(ts)[:4])
+                            # broj poput 1999 tretiraj kao godinu -> 1999-01-01 (zadržavamo pun datum)
+                            year_candidate = int(str(ts)[:4])
+                            if 1800 <= year_candidate <= _dt.utcnow().year:
+                                iso_str = f"{year_candidate}-01-01"
                     elif isinstance(v, str):
-                        yr = None
-                        if v.isdigit() and len(v) >= 4:
-                            yr = int(v[:4])
-                        elif len(v) >= 4:
-                            # take first 4 digit sequence
-                            import re
-                            m = re.search(r"(19|20)\d{2}", v)
-                            if m:
-                                yr = int(m.group(0))
-                        if yr:
-                            v = yr
+                        s = v.strip()
+                        if len(s) >= 10 and s[4] == '-' and s[7] == '-':
+                            iso_str = s[:10]
                         else:
-                            v = None
-                    # basic sanity
-                    if isinstance(v, int) and (1800 <= v <= datetime.utcnow().year):
-                        pass
+                            # pokušaj izvući YYYY pa mapirati na 01-01
+                            import re
+                            m = re.search(r"(18|19|20)\d{2}", s)
+                            if m:
+                                year_candidate = int(m.group(0))
+                                if 1800 <= year_candidate <= _dt.utcnow().year:
+                                    iso_str = f"{year_candidate}-01-01"
+                    v = iso_str
+                    if v:
+                        dob_seen += 1
+                        if len(dob_samples_kept) < 3:
+                            dob_samples_kept.append(v)
                     else:
-                        v = None
-                except Exception:
-                    v = None
+                        dob_dropped += 1
+                        if raw_original is not None and len(dob_samples_dropped) < 3:
+                            dob_samples_dropped.append(repr(raw_original))
+                except Exception as _dob_ex:
+                    dob_dropped += 1
+                    if len(dob_samples_dropped) < 3:
+                        dob_samples_dropped.append(f"EXC:{type(_dob_ex).__name__}:{repr(r.get('date_of_birth'))}")
+                # ako parsiranje nije uspjelo nemoj dodati field
+                if v is None:
+                    continue
             # numeric coercion
             if k in int_fields:
                 v = _to_int(v)
@@ -278,6 +299,13 @@ def _clean_rows(table: str, rows: Iterable[Dict[str, Any]]) -> List[Dict[str, An
                 cleaned[k] = v
         if cleaned:
             out.append(cleaned)
+    if table == "players" and (dob_dropped or dob_seen):  # only log if we actually touched DOB values
+        try:
+            logger.info(
+                f"core.database | [players clean] dob_kept={dob_seen} dob_dropped={dob_dropped} kept_sample={dob_samples_kept} dropped_sample={dob_samples_dropped}"
+            )
+        except Exception:
+            pass
     return out
 
 # ------------------------------ DB client ------------------------------
@@ -487,19 +515,41 @@ class DatabaseClient:
         Safe players upsert:
         - 'rich' rows s full_name -> normal upsert (insert/update)
         - 'lean' rows bez full_name -> UPDATE only (bez insert-a koji bi kršio NOT NULL)
-        Preferiraj redove koji nose team_id kad dedupiraš.
+        Dedup sada preferira "richer" red (team_id, date_of_birth, nationality, height_cm) –
+        sprječava gubitak date_of_birth ako je prvi viđen duplikat bio bez DOB.
         """
+        # Pre-clean diagnostics for DOB propagation
+        try:
+            raw_dob = sum(1 for r in rows if (r or {}).get("date_of_birth"))
+            raw_total = len(rows)
+            raw_sample = [
+                {k: r.get(k) for k in ("sofascore_id","date_of_birth","full_name","team_id")}
+                for r in rows[:3]
+            ]
+            logger.info(f"core.database | [players pre-clean] rows={raw_total} dob_raw={raw_dob} sample={raw_sample}")
+        except Exception:
+            pass
         clean = _clean_rows("players", rows)
         if not clean:
             return (0, 0)
         tmp: Dict[Any, Dict[str, Any]] = {}
+        def richness(p: Dict[str, Any]) -> tuple[int,int,int,int]:
+            return (
+                1 if p.get("team_id") else 0,
+                1 if p.get("date_of_birth") else 0,
+                1 if p.get("nationality") else 0,
+                1 if p.get("height_cm") else 0,
+            )
         for p in clean:
             k = p.get("sofascore_id")
             if k is None:
                 continue
             prev = tmp.get(k)
-            if not prev or (p.get("team_id") and not prev.get("team_id")):
+            if not prev:
                 tmp[k] = p
+            else:
+                if richness(p) > richness(prev):
+                    tmp[k] = p
         payload = list(tmp.values())
 
         rich = [p for p in payload if p.get("full_name")]
@@ -508,6 +558,19 @@ class DatabaseClient:
         ok_rich = fail_rich = 0
         if rich:
             ok_rich, fail_rich = self._upsert("players", rich, on_conflict="sofascore_id")
+            # Post-upsert verification: read back a few rows that had date_of_birth to confirm persistence
+            try:
+                verify_ids = [p.get("sofascore_id") for p in rich if p.get("date_of_birth")][:5]
+                if verify_ids:
+                    res = (
+                        self.client.table("players")
+                        .select("sofascore_id,date_of_birth,full_name")
+                        .in_("sofascore_id", verify_ids)
+                        .execute()
+                    )
+                    logger.info(f"core.database | [players verify] fetched={len(res.data or [])} sample={res.data}")
+            except Exception as _vex:
+                logger.warning(f"core.database | [players verify] failed: {_vex}")
 
         # lean -> update only (per row)
         updated = skipped = failed = 0

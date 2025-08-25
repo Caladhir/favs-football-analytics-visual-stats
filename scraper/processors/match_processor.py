@@ -188,7 +188,100 @@ class MatchProcessor:
             raw_shots = enriched.get("_raw_shots")
             if raw_shots:
                 try:
-                    shots.extend(shots_processor.parse(raw_shots, ev_id))
+                    parsed_shots = shots_processor.parse(raw_shots, ev_id)
+                    # Attempt to enrich missing assist IDs for goal shots via incidents (events) map
+                    try:
+                        # Build local goal assist lookup: (minute, player_sofa_id) -> assist_sofa_id
+                        goal_assists: Dict[tuple, int] = {}
+                        for er in event_rows:
+                            if er.get("event_type") in {"goal","own_goal"}:
+                                ap = er.get("assist_player_sofascore_id")
+                                sp = er.get("player_sofascore_id")
+                                mn = er.get("minute")
+                                if ap and sp and mn is not None:
+                                    key = (int(mn), int(sp))
+                                    # keep first (provider order) if multiple
+                                    goal_assists.setdefault(key, int(ap))
+                        if goal_assists:
+                            patched = 0
+                            fuzzy_hits = 0
+                            unresolved_samples = []
+                            # Precompute per-player goal assist minutes to allow fuzzy lookup if exact minute mismatch
+                            per_player_minutes: Dict[int, List[int]] = {}
+                            for (mn, sp), aid in goal_assists.items():
+                                per_player_minutes.setdefault(sp, []).append(mn)
+                            # Also keep per-player (minute, assist_id) list for distance scoring
+                            per_player_pairs: Dict[int, List[tuple[int,int]]] = {}
+                            for (mn, sp), aid in goal_assists.items():
+                                per_player_pairs.setdefault(sp, []).append((mn, aid))
+                            # Sort minutes for deterministic smallest-distance selection
+                            for sp, lst in per_player_pairs.items():
+                                lst.sort(key=lambda x: x[0])
+                            goal_shot_candidates = 0
+                            for sh in parsed_shots:
+                                if sh.get("outcome") == "goal" and not sh.get("assist_player_sofascore_id"):
+                                    try:
+                                        sm = sh.get("minute")
+                                        spid = sh.get("player_sofascore_id")
+                                        if sm is None or spid is None:
+                                            continue
+                                        goal_shot_candidates += 1
+                                        mk = (int(sm), int(spid))
+                                        apid = goal_assists.get(mk)
+                                        # Fuzzy minute match (+/-1) if exact not found
+                                        if not apid:
+                                            for delta in (-1, 1):
+                                                apid = goal_assists.get((int(sm)+delta, int(spid)))
+                                                if apid:
+                                                    fuzzy_hits += 1
+                                                    break
+                                        # Wider fuzzy window (+/-2, +/-3)
+                                        if not apid:
+                                            for delta in (-2, 2, -3, 3):
+                                                apid = goal_assists.get((int(sm)+delta, int(spid)))
+                                                if apid:
+                                                    fuzzy_hits += 1
+                                                    break
+                                        # If still not found and player has exactly one assist minute, take it (rare fallback)
+                                        if not apid:
+                                            mins_for_player = per_player_minutes.get(int(spid)) or []
+                                            if len(mins_for_player) == 1:
+                                                apid = goal_assists.get((mins_for_player[0], int(spid)))
+                                        # Distance-based fallback: choose closest minute within +/-3
+                                        if not apid:
+                                            pairs = per_player_pairs.get(int(spid)) or []
+                                            if pairs:
+                                                # compute min abs distance
+                                                best_pair = None
+                                                best_dist = 999
+                                                for (gmin, aid) in pairs:
+                                                    d = abs(int(sm) - gmin)
+                                                    if d < best_dist:
+                                                        best_dist = d
+                                                        best_pair = (gmin, aid)
+                                                if best_pair and best_dist <= 3:
+                                                    apid = best_pair[1]
+                                                    fuzzy_hits += 1
+                                        if apid:
+                                            sh["assist_player_sofascore_id"] = apid
+                                            patched += 1
+                                        else:
+                                            if len(unresolved_samples) < 5:
+                                                unresolved_samples.append({
+                                                    "shot_min": sm,
+                                                    "player": spid,
+                                                    "goal_keys_sample": list(goal_assists.keys())[:5]
+                                                })
+                                    except Exception:
+                                        continue
+                            if patched or unresolved_samples or goal_shot_candidates:
+                                # Promote to INFO so it appears in normal run logs
+                                _mp_logger.info(
+                                    f"[match_processor][shots_assist_patch] ev={ev_id} goal_shots_without_initial_assist={goal_shot_candidates} patched={patched} fuzzy_matches={fuzzy_hits} goals_with_assist_events={len(goal_assists)} unresolved={len(unresolved_samples)} samples={unresolved_samples}"
+                                )
+                    except Exception:
+                        pass
+                    shots.extend(parsed_shots)
                 except Exception:
                     pass
             raw_avg = enriched.get("_raw_avg_positions")

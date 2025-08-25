@@ -8,12 +8,18 @@ class CompetitionProcessor:
         t = event.get("tournament") or event.get("competition") or {}
         if not isinstance(t, dict):
             return None
-        tid = t.get("id")
-        if not tid:
+        # SofaScore event payload normally: tournament.id (season-specific), tournament.uniqueTournament.id (stable competition)
+        tid_season = t.get("id")
+        ut = t.get("uniqueTournament") if isinstance(t.get("uniqueTournament"), dict) else {}
+        tid_unique = ut.get("id") if isinstance(ut, dict) else None
+        # Prefer unique tournament ID for logo + primary key; fallback to season id
+        tid_primary = tid_unique or tid_season
+        if not tid_primary:
             return None
-        name = t.get("name") or ""
-        # Derive logo URL (SofaScore pattern) if ID present
-        logo_url = f"https://img.sofascore.com/api/v1/unique-tournament/{tid}/image/dark" if tid else None
+        name = t.get("name") or (ut.get("name") if isinstance(ut, dict) else "") or ""
+        # Derive logo URL using unique tournament id when available
+        logo_id = tid_unique or tid_season
+        logo_url = f"https://img.sofascore.com/api/v1/unique-tournament/{logo_id}/image/dark" if logo_id else None
         # Optional priority / order fields (if exposed). Some payloads provide a nested category or priority.
         priority = None
         try:
@@ -28,7 +34,10 @@ class CompetitionProcessor:
             country = cat.get("name") or cat.get("countryName") or cat.get("alpha2")
         except Exception:
             country = None
-        out = {"sofascore_id": int(tid), "name": name}
+        out = {"sofascore_id": int(tid_primary), "name": name}
+        if tid_season and tid_unique and tid_season != tid_unique:
+            out["season_tournament_id"] = int(tid_season)
+            out["unique_tournament_id"] = int(tid_unique)
         if logo_url:
             out["logo_url"] = logo_url
         if priority is not None:
