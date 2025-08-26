@@ -32,20 +32,16 @@ def enrich_event(browser: Any, event: Dict[str, Any], throttle: float = 0.0, *, 
     eid = event.get("id")
     # Allow-list gating (uniqueTournament id) – skip early if not allowed
     try:
-        utid = (event.get("tournament") or {}).get("uniqueTournament") or {}
-        utid_val = utid.get("id") if isinstance(utid, dict) else None
-        if SOFA_TOURNAMENTS_ALLOW:
-            # Primary gating by explicit ID allow-list
-            if utid_val not in SOFA_TOURNAMENTS_ALLOW:
-                # Fallback: allow if competition still matches name-based priority rules
-                comp = (event.get("tournament") or {}).get("uniqueTournament") or {}
-                if not should_track_competition(comp):
-                    return {"event": event, "event_id": eid, "_skip": "not_in_allowlist"}
-        else:
-            # No explicit ID list -> use name-based decision alone
-            comp = (event.get("tournament") or {}).get("uniqueTournament") or {}
-            if comp and not should_track_competition(comp):
-                return {"event": event, "event_id": eid, "_skip": "not_in_priority_names"}
+        tour = (event.get("tournament") or {})
+        ut = tour.get("uniqueTournament") if isinstance(tour.get("uniqueTournament"), dict) else {}
+        utid_val = ut.get("id") if isinstance(ut, dict) else None
+        comp_obj = ut if ut else tour
+        allow_list_hit = bool(SOFA_TOURNAMENTS_ALLOW and utid_val in SOFA_TOURNAMENTS_ALLOW)
+        name_priority_hit = should_track_competition(comp_obj) if comp_obj else False
+        if not (allow_list_hit or name_priority_hit):
+            # Mark skip reason (prefer explicit allow miss vs name miss)
+            reason = "not_in_allow_or_priority"
+            return {"event": event, "event_id": eid, "_skip": reason}
     except Exception:
         pass
     enriched: Dict[str, Any] = {"event": event, "event_id": eid}

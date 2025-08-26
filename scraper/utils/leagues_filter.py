@@ -177,7 +177,29 @@ def should_track_competition(tournament: Dict[str, Any]) -> bool:
 
 
 def should_track_match(match: Dict[str, Any]) -> bool:
-    t = (match or {}).get("tournament") or (match or {}).get("league") or (match or {}).get("competition") or {}
+    """High-level match filter tolerant of SofaScore nesting variants.
+
+    SofaScore event JSON često ima strukturu:
+        event.tournament.uniqueTournament.id
+    dok ponekad koristimo flattenirano:
+        event.tournament.id
+
+    Stari kod je očekivao da je 'tournament' već objekt s .id. Ako je samo
+    uniqueTournament unutra, vraćali smo False (ne prati se) i ti eventi su
+    otpali. Ova verzija prvo pokušava uniqueTournament, zatim bazni tournament.
+    """
+    if not isinstance(match, dict):  # defensive
+        return False
+    tour = (match.get("tournament") or {}) if isinstance(match.get("tournament"), dict) else {}
+    # Ako postoji ugniježđeni uniqueTournament, preuzmi njega kao primarni objekt
+    if isinstance(tour.get("uniqueTournament"), dict) and tour.get("uniqueTournament", {}).get("id"):
+        cand = dict(tour.get("uniqueTournament") or {})  # copy
+        # Propagiraj name/slug ako su samo na parentu
+        cand.setdefault("name", tour.get("name"))
+        cand.setdefault("slug", tour.get("slug"))
+        return should_track_competition(cand)
+    # Inače pokušaj tournament sam ili fallback legacy keys
+    t = tour or (match.get("league") or {}) or (match.get("competition") or {})
     return should_track_competition(t)
 
 

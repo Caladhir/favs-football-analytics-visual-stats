@@ -338,9 +338,10 @@ class MatchProcessor:
                                         continue
                             if patched or unresolved_samples or goal_shot_candidates:
                                 # Promote to INFO so it appears in normal run logs
-                                _mp_logger.info(
-                                    f"[match_processor][shots_assist_patch] ev={ev_id} goal_shots_without_initial_assist={goal_shot_candidates} patched={patched} fuzzy_matches={fuzzy_hits} goals_with_assist_events={len(goal_assists)} unresolved={len(unresolved_samples)} samples={unresolved_samples}"
-                                )
+                                if _mp_logger.isEnabledFor(10):  # DEBUG level
+                                    _mp_logger.debug(
+                                        f"[match_processor][shots_assist_patch] ev={ev_id} goal_shots_without_initial_assist={goal_shot_candidates} patched={patched} fuzzy_matches={fuzzy_hits} goals_with_assist_events={len(goal_assists)} unresolved={len(unresolved_samples)} samples={unresolved_samples}"
+                                    )
                     except Exception:
                         pass
                     shots.extend(parsed_shots)

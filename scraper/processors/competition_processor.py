@@ -17,25 +17,20 @@ class CompetitionProcessor:
         if not tid_primary:
             return None
         name = t.get("name") or (ut.get("name") if isinstance(ut, dict) else "") or ""
-        # Derive logo URL using unique tournament id when available
         logo_id = tid_unique or tid_season
         logo_url = f"https://img.sofascore.com/api/v1/unique-tournament/{logo_id}/image/dark" if logo_id else None
-        # Optional priority / order fields (if exposed). Some payloads provide a nested category or priority.
         priority = None
         try:
             priority = t.get("priority") or t.get("order") or (t.get("category") or {}).get("priority")
         except Exception:
             priority = None
-        # Country enrichment (regression vs. legacy) – derive from category/name fields if available
         country = None
         try:
             cat = t.get("category") or {}
-            # Sofascore category name is typically country/region (e.g. "England")
             country = cat.get("name") or cat.get("countryName") or cat.get("alpha2")
         except Exception:
             country = None
         out = {"sofascore_id": int(tid_primary), "name": name}
-        # Always surface both IDs if available for downstream mapping / diagnostics
         if tid_unique:
             out["unique_tournament_id"] = int(tid_unique)
         if tid_season:

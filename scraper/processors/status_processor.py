@@ -1,6 +1,7 @@
 # scraper/processors/status_processor.py
 from __future__ import annotations
 from typing import Any, Dict, Optional
+from core.config import Config
 
 # Map raw SofaScore status strings to a limited set accepted by our DB.
 #
@@ -11,39 +12,7 @@ from typing import Any, Dict, Optional
 # Incoming SofaScore values are normalised by lower‑casing and removing
 # whitespace/underscores before lookup.  Any unrecognised status will
 # default to 'upcoming'.
-_STATUS_MAP = {
-    # Upcoming / not yet started
-    "notstarted": "upcoming",
-    "not_started": "upcoming",
-    "prematch": "upcoming",
-    "scheduled": "upcoming",
-    "upcoming": "upcoming",
-    # Live / in‑progress
-    "live": "live",
-    "inprogress": "live",
-    "inprogresslive": "live",
-    "in_progress": "live",
-    # Half‑time – record separately
-    "halftime": "ht",
-    "ht": "ht",
-    # Full‑time / finished
-    "afterextra": "ft",
-    "penalties": "ft",
-    "finished": "ft",
-    "ended": "ft",
-    "ft": "ft",
-    "fulltime": "ft",
-    # Postponed/delayed
-    "postponed": "postponed",
-    "delayed": "postponed",
-    # Cancelled / abandoned
-    "canceled": "canceled",
-    "cancelled": "canceled",
-    "abandoned": "abandoned",
-    # Suspended/interrupted
-    "suspended": "suspended",
-    "interrupted": "suspended",
-}
+_STATUS_MAP = {k.replace("_", ""): v for k, v in Config.STATUS_MAPPING.items()}  # normalise keys once
 
 def normalize_status(raw: Optional[str]) -> str:
     """Normalise an arbitrary status string to one of the allowed values.

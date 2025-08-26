@@ -67,9 +67,7 @@ class FetchLoop:
             pass
         self._state_file = state_dir / "finished_events.json"
         self._load_finished_state()
-        # Live snapshot (all live events minimal) for UI quick display
-        self._live_snapshot = []  # type: ignore[list]
-        self._live_snapshot_file = Path(os.getenv("LIVE_SNAPSHOT_PATH", Path(__file__).resolve().parents[1] / "state" / "live_snapshot.json"))
+        # Snapshot JSON disabled (DB match_state now canonical). Keep counters only.
         self._last_live_count = 0
 
     # ------- state persistence -------
@@ -154,6 +152,7 @@ class FetchLoop:
                 raw_live_events = len(live_data)
             # Build full live snapshot BEFORE limiting for heavy processing
             full_live_events = _take_events(live_data)
+            # Build lightweight in-memory snapshot (not written to disk)
             live_snapshot: List[Dict[str, Any]] = []
             for ev in full_live_events:
                 if not isinstance(ev, dict):
@@ -188,22 +187,8 @@ class FetchLoop:
                     })
                 except Exception:
                     pass
-            # Persist snapshot (all live events) even if we later limit heavy work
-            try:
-                if live_snapshot:
-                    self._live_snapshot = live_snapshot
-                    self._last_live_count = len(live_snapshot)
-                    self._live_snapshot_file.parent.mkdir(parents=True, exist_ok=True)
-                    self._live_snapshot_file.write_text(json.dumps({
-                        "generatedAt": int(time.time()),
-                        "count": len(live_snapshot),
-                        "events": live_snapshot
-                    }), encoding="utf-8")
-                    logger.info(f"[live_snapshot] total_live={len(live_snapshot)} saved='{self._live_snapshot_file.name}' (heavy_processing_cap={self.max_events})")
-                else:
-                    logger.info("[live_snapshot] no live events")
-            except Exception as ex:
-                logger.warning(f"[live_snapshot][write_fail] err={ex}")
+            # Only keep count (no file persistence)
+            self._last_live_count = len(live_snapshot)
             if raw_live_events and raw_live_events != sum(1 for _, cls in self._cycle_classification.items() if cls == "live"):
                 logger.info(f"[diag][live_count_mismatch] raw_list={raw_live_events} distinct_ids={sum(1 for _, cls in self._cycle_classification.items() if cls=='live')} duplicates={raw_live_events - sum(1 for _, cls in self._cycle_classification.items() if cls=='live')}")
 
