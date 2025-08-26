@@ -35,9 +35,11 @@ class CompetitionProcessor:
         except Exception:
             country = None
         out = {"sofascore_id": int(tid_primary), "name": name}
-        if tid_season and tid_unique and tid_season != tid_unique:
-            out["season_tournament_id"] = int(tid_season)
+        # Always surface both IDs if available for downstream mapping / diagnostics
+        if tid_unique:
             out["unique_tournament_id"] = int(tid_unique)
+        if tid_season:
+            out["season_tournament_id"] = int(tid_season)
         if logo_url:
             out["logo_url"] = logo_url
         if priority is not None:

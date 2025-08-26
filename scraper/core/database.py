@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, Tuple, Iterable, Set
 from datetime import datetime, timezone, timedelta
 
 from supabase import create_client, Client
+import os
 from .config import config
 from utils.logger import get_logger
 
@@ -139,6 +140,9 @@ _ALLOWED = {
     },
     "match_managers": {"match_id","manager_id","team_id","side"},
 
+    # live volatile state (separated from canonical match identity)
+    "match_state": {"match_id","status","status_type","minute","home_score","away_score","updated_at"},
+
     # average_positions no longer stores touches/minutes (moved to player_stats)
     "average_positions": {"match_id","player_id","team_id","avg_x","avg_y"},
     "shots": {
@@ -163,6 +167,7 @@ _INT_FIELDS: Dict[str, Set[str]] = {
     # average_positions now only has numeric coords (handled in _FLOAT_FIELDS)
     "average_positions": set(),
     "shots": {"minute","source_event_id","source_item_id"},
+    "match_state": {"minute","home_score","away_score"},
 }
 _FLOAT_FIELDS: Dict[str, Set[str]] = {
     "player_stats": {"rating"},
@@ -315,6 +320,20 @@ class DatabaseClient:
         logger.info("core.database | Initializing Supabase client…")
         self.client: Client = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
         logger.info("core.database | ✅ Supabase ready")
+
+    # --- simple diagnostics ---
+    def table_count(self, table: str) -> int:
+        """Return approximate row count (exact count via count='exact').
+        Falls back to 0 on error so we can log without breaking flow."""
+        try:
+            res = self.client.table(table).select('id', count='exact').limit(1).execute()
+            # supabase-py returns count attribute on response
+            cnt = getattr(res, 'count', None)
+            if isinstance(cnt, int):
+                return cnt
+        except Exception as ex:
+            logger.debug(f"core.database | table_count fail table={table} err={ex}")
+        return 0
 
     # --- health/perf ---
     def health_check(self) -> bool:
@@ -1162,6 +1181,54 @@ class DatabaseClient:
         payload = list(tmp.values())
         return self._upsert("standings", payload, on_conflict="competition_id,season,team_id")
 
+    # -------------------- match_state (live snapshot) --------------------
+    def upsert_match_state(self, rows: List[Dict[str, Any]], save_history: bool | None = None) -> tuple[int, int]:
+        """Upsert volatile per-match live state (status/minute/score) into match_state.
+
+        rows: [{match_id, status, status_type?, minute?, home_score?, away_score?, updated_at?}]
+        save_history: if truthy, also append snapshot rows to match_state_history (if table exists).
+        """
+        if not rows:
+            logger.debug("core.database | match_state upsert skipped (no rows)")
+            return (0, 0)
+        clean = _clean_rows("match_state", rows)
+        if not clean:
+            logger.warning(f"core.database | match_state upsert got rows={len(rows)} but none survived cleaning (fields mismatch?) sample={rows[:1]}")
+            return (0, 0)
+        # dedupe by match_id (last wins)
+        tmp: Dict[str, Dict[str, Any]] = {}
+        for r in clean:
+            mid = r.get("match_id")
+            if not mid:
+                continue
+            tmp[mid] = r
+        payload = list(tmp.values())
+        logger.debug(f"core.database | match_state prepared size_in={len(rows)} clean={len(clean)} dedup={len(payload)} sample={payload[:1]}")
+        ok, fail = self._upsert("match_state", payload, on_conflict="match_id")
+        logger.info(f"core.database | match_state upsert ok={ok} fail={fail}")
+        # optional history
+        if (save_history if save_history is not None else (os.getenv("SAVE_MATCH_STATE_HISTORY", "0").lower() in {"1","true","yes"})) and ok:
+            try:
+                history_rows = [
+                    {
+                        "match_id": r.get("match_id"),
+                        "status": r.get("status"),
+                        "status_type": r.get("status_type"),
+                        "minute": r.get("minute"),
+                        "home_score": r.get("home_score"),
+                        "away_score": r.get("away_score"),
+                    } for r in payload if r.get("match_id")
+                ]
+                if history_rows:
+                    try:
+                        self.client.table("match_state_history").insert(history_rows).execute()
+                    except Exception as hx:
+                        # don't fail the main upsert if history insert fails
+                        logger.debug(f"core.database | match_state history insert skipped: {hx}")
+            except Exception:
+                pass
+        return (ok, fail)
+
     # -------------------- matches (batch) --------------------
 
     def _patch_match(self, row: Dict[str, Any]) -> None:
@@ -1183,14 +1250,32 @@ class DatabaseClient:
         if not matches:
             return (0, 0)
 
+        raw_in = len(matches)
         rows = dedupe_matches(_clean_rows("matches", matches))
+        after_clean = len(rows)
 
         # ne pokušavaj upisati "skeletne" redove bez obaveznih polja
-        rows = [
-            m for m in rows
-            if (m.get("home_team") or m.get("home_team_id")) 
-            and (m.get("away_team") or m.get("away_team_id"))
-        ]
+        filtered: List[Dict[str, Any]] = []
+        dropped: List[Dict[str, Any]] = []
+        for m in rows:
+            ok_home = (m.get("home_team") or m.get("home_team_id"))
+            ok_away = (m.get("away_team") or m.get("away_team_id"))
+            if ok_home and ok_away:
+                filtered.append(m)
+            else:
+                dropped.append(m)
+        if dropped:
+            try:
+                sample = [
+                    {k: d.get(k) for k in ("source_event_id","home_team","away_team","home_team_id","away_team_id")}
+                    for d in dropped[:5]
+                ]
+                logger.warning(
+                    f"core.database | matches drop filter raw_in={raw_in} after_clean={after_clean} kept={len(filtered)} dropped={len(dropped)} sample={sample}"
+                )
+            except Exception:
+                pass
+        rows = filtered
 
         group_src = [m for m in rows if m.get("source") and m.get("source_event_id") is not None]
         group_id  = [m for m in rows if m not in group_src and m.get("id")]
@@ -1264,6 +1349,24 @@ class DatabaseClient:
 
         rate = (total_ok / len(rows) * 100.0) if rows else 0.0
         logger.info(f"core.database | matches upsert done: total={len(rows)} ok={total_ok} fail={total_fail} rate={rate:.1f}%")
+        # Post-upsert verification: count + sample
+        try:
+            cnt = self.table_count("matches")
+            if cnt == 0 and total_ok > 0:
+                logger.warning("core.database | matches verify count=0 BUT ok>0 (check SUPABASE_URL / RLS / replica lag)")
+            else:
+                logger.info(f"core.database | matches verify count={cnt}")
+            # Fetch tiny sample
+            try:
+                res = (self.client.table("matches")
+                       .select("id,home_team,away_team,status,start_time")
+                       .limit(2)
+                       .execute())
+                logger.info(f"core.database | matches sample={res.data}")
+            except Exception as exs:
+                logger.debug(f"core.database | matches sample fetch fail: {exs}")
+        except Exception:
+            pass
         return (total_ok, total_fail)
 
     # -------------------- maintenance --------------------

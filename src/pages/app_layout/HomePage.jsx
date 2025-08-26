@@ -1,4 +1,4 @@
-// src/pages/app_layout/HomePage.jsx - KOMPLETNO AŽURIRANO S NOVIM BUTTON KOMPONENTAMA
+// src/pages/app_layout/HomePage.jsx - UPDATED WITH IMPROVEMENTS
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import AnimatedBackground from "../../features/homepage/AnimatedBackground";
@@ -7,9 +7,10 @@ import QuickStatsSection from "../../features/homepage/QuickStatsSection";
 import FeaturesSection from "../../features/homepage/FeaturesSection";
 import TrendingSection from "../../features/homepage/TrendingSection";
 
-// Import novih button komponenti
-import Button from "../../ui/Button"; // DEFAULT IMPORT
-import { CTAButton } from "../../ui/SpecializedButtons"; // NAMED IMPORT
+// Import button components
+import Button from "../../ui/Button";
+import { CTAButton } from "../../ui/SpecializedButtons";
+
 export default function HomePage() {
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -18,12 +19,15 @@ export default function HomePage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-red-950 text-white overflow-hidden relative">
+    <main
+      className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-red-950 text-white overflow-x-hidden relative
+    "
+    >
       <AnimatedBackground />
 
       {/* Hero Section */}
       <section
-        className={`relative z-10 text-center py-20 px-4 transition-all duration-1000 ${
+        className={`relative z-10 text-center py-20 px-6 transition-all duration-1000 ${
           isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
         }`}
       >
@@ -31,98 +35,124 @@ export default function HomePage() {
           <h1 className="font-black text-7xl md:text-8xl mb-4 text-red-500 animate-pulse-slow">
             F.A.V.S.
           </h1>
-          <p className="text-xl md:text-2xl text-gray-300 font-light tracking-wider">
+          <p className="text-xl md:text-2xl text-gray-300 font-light tracking-wider mb-2">
             Football Analytics & Visual Stats
+          </p>
+          <p className="text-lg text-gray-400 max-w-2xl mx-auto">
+            The most advanced platform for football data analysis with live
+            tracking, detailed statistics, and AI predictions
           </p>
         </div>
 
-        {/* CTA Button with new component */}
+        {/* CTA Button */}
         <Link to="/dashboard">
-          <CTAButton>Počni Analizu</CTAButton>
+          <CTAButton>🚀 Start Analysis</CTAButton>
         </Link>
       </section>
 
-      {/* Live Matches Ticker - Pravi podaci */}
+      {/* Live Matches Ticker */}
       <LiveMatchTicker />
 
-      {/* Quick Stats Cards - Pravi podaci */}
+      {/* Quick Stats Cards */}
       <QuickStatsSection />
 
-      {/* Feature Cards - Statične */}
+      {/* Feature Cards */}
       <FeaturesSection />
 
-      {/* Trending Section - Pravi podaci */}
+      {/* Trending Section */}
       <TrendingSection />
 
-      {/* Footer CTA - KOMPLETNO AŽURIRANO */}
-      <section className="relative z-10 text-center py-20 px-6">
-        <div className="max-w-4xl mx-auto">
-          <h2 className="text-4xl md:text-5xl font-bold mb-6 bg-gradient-to-r from-red-400 via-white to-red-400 bg-clip-text text-transparent">
-            Spremni za Naprednu Analizu?
-          </h2>
-          <p className="text-xl text-gray-300 mb-8">
-            Pridruži se tisućama korisnika koji koriste F.A.V.S. za bolje
-            razumijevanje nogometa
-          </p>
-
-          {/* Ažurirani buttons s novim komponentama */}
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link to="/dashboard">
-              <CTAButton>Kreiraj Besplatan Račun</CTAButton>
-            </Link>
-
-            <Link to="/matches">
-              <Button
-                variant="ghost"
-                size="lg"
-                leftIcon="mdi:play-circle-outline"
-              >
-                Pregledaj Demo
-              </Button>
-            </Link>
-          </div>
-
-          {/* Dodatni CTA section */}
-          <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-red-500/30 transition-colors">
-              <div className="text-3xl mb-3">⚡</div>
-              <h3 className="text-lg font-semibold mb-2">Live Praćenje</h3>
-              <p className="text-gray-400 text-sm mb-4">
-                Prati utakmice uživo s detaljnim statistikama
+      {/* Footer CTA - ENHANCED */}
+      <section className="relative z-10 py-20 px-6 -mx-6">
+        <div className="bg-gradient-to-r from-red-950/30 via-gray-900/50 to-red-950/30 backdrop-blur-sm border-y border-red-500/20">
+          <div className="container mx-auto max-w-4xl py-16">
+            <div className="text-center mb-12">
+              <h2 className="text-4xl md:text-5xl font-bold mb-6 bg-gradient-to-r from-red-400 via-white to-red-400 bg-clip-text text-transparent">
+                Ready for Advanced Analysis?
+              </h2>
+              <p className="text-xl text-gray-300 mb-8">
+                Join thousands of users who use F.A.V.S. for deep football
+                analysis
               </p>
-              <Link to="/matches/live">
-                <Button variant="outline" size="sm" fullWidth>
-                  Pogledaj Live
-                </Button>
-              </Link>
+
+              {/* Main CTA Buttons */}
+              <div className="flex flex-col sm:flex-row gap-4 justify-center mb-12">
+                <Link to="/dashboard">
+                  <CTAButton>Create Free Account</CTAButton>
+                </Link>
+
+                <Link to="/matches">
+                  <Button
+                    variant="ghost"
+                    size="lg"
+                    leftIcon="mdi:play-circle-outline"
+                  >
+                    View Demo
+                  </Button>
+                </Link>
+              </div>
             </div>
 
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-red-500/30 transition-colors">
-              <div className="text-3xl mb-3">📊</div>
-              <h3 className="text-lg font-semibold mb-2">Analitika</h3>
-              <p className="text-gray-400 text-sm mb-4">
-                Dubinska analiza timova i igrača
-              </p>
-              <Link to="/teams">
-                <Button variant="outline" size="sm" fullWidth>
-                  Istraži Timove
-                </Button>
-              </Link>
-            </div>
+            {/* Feature Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="group bg-gradient-to-br from-gray-800/50 to-gray-900/70 backdrop-blur-sm rounded-2xl p-6 border border-red-500/20 hover:border-red-500/40 transition-all duration-300 hover:scale-105">
+                <div className="text-center">
+                  <div className="text-4xl mb-4 group-hover:animate-bounce">
+                    ⚡
+                  </div>
+                  <h3 className="text-lg font-semibold mb-2 text-white group-hover:text-red-400 transition-colors">
+                    Live Tracking
+                  </h3>
+                  <p className="text-gray-400 text-sm mb-4 group-hover:text-gray-300 transition-colors">
+                    Track matches live with detailed statistics
+                  </p>
+                  <Link to="/matches/live">
+                    <Button variant="outline" size="sm" fullWidth>
+                      Watch Live
+                    </Button>
+                  </Link>
+                </div>
+              </div>
 
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:border-red-500/30 transition-colors">
-              <div className="text-3xl mb-3">🎯</div>
-              <h3 className="text-lg font-semibold mb-2">Predviđanja</h3>
-              <p className="text-gray-400 text-sm mb-4">
-                AI predikcije s visokom preciznošću
-              </p>
-              <Button variant="outline" size="sm" fullWidth disabled>
-                Uskoro
-              </Button>
+              <div className="group bg-gradient-to-br from-gray-800/50 to-gray-900/70 backdrop-blur-sm rounded-2xl p-6 border border-red-500/20 hover:border-red-500/40 transition-all duration-300 hover:scale-105">
+                <div className="text-center">
+                  <div className="text-4xl mb-4 group-hover:animate-bounce">
+                    📊
+                  </div>
+                  <h3 className="text-lg font-semibold mb-2 text-white group-hover:text-red-400 transition-colors">
+                    Analytics
+                  </h3>
+                  <p className="text-gray-400 text-sm mb-4 group-hover:text-gray-300 transition-colors">
+                    Deep analysis of teams and players
+                  </p>
+                  <Link to="/teams">
+                    <Button variant="outline" size="sm" fullWidth>
+                      Explore Teams
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+
+              <div className="group bg-gradient-to-br from-gray-800/50 to-gray-900/70 backdrop-blur-sm rounded-2xl p-6 border border-red-500/20 hover:border-red-500/40 transition-all duration-300 hover:scale-105">
+                <div className="text-center">
+                  <div className="text-4xl mb-4 group-hover:animate-bounce">
+                    🎯
+                  </div>
+                  <h3 className="text-lg font-semibold mb-2 text-white group-hover:text-red-400 transition-colors">
+                    Predictions
+                  </h3>
+                  <p className="text-gray-400 text-sm mb-4 group-hover:text-gray-300 transition-colors">
+                    AI predictions with high accuracy
+                  </p>
+                  <Button variant="outline" size="sm" fullWidth disabled>
+                    Coming Soon
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
-    </div>
+    </main>
   );
 }

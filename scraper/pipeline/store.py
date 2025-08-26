@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Dict, List, Any, Tuple
-from datetime import datetime
+import datetime as _dt
 from utils.logger import get_logger
 from core.database import db
 from .manager_enrichment import enrich_manager_details
@@ -8,7 +8,6 @@ from .player_enrichment import enrich_player_details
 
 logger = get_logger(__name__)
 
-# Public API ---------------------------------------------------------------
 
 def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle: float = 0.0) -> Dict[str, Tuple[int,int]]:
     """Persist a prepared bundle (competitions, teams, players, matches, etc.).
@@ -23,7 +22,12 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
     comps = bundle.get("competitions", []) or []
     if comps:
         counts["competitions"] = db.upsert_competitions(comps)
+        try:
+            logger.info(f"[store][competitions][verify] db_count={db.table_count('competitions')}")
+        except Exception:
+            pass
     teams = bundle.get("teams", []) or []
+    _teams_input = list(teams)  # keep original for diagnostic counts
     # optional enrichment for each team to pull venue/founded/capacity
     if teams and browser is not None:
         enriched_teams: List[Dict[str, Any]] = []
@@ -45,7 +49,7 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
                                     ts = int(f_raw)
                                     # treat as epoch seconds (positive or negative)
                                     if abs(ts) > 10**8:  # roughly > ~3 years, so epoch
-                                        year_val = datetime.utcfromtimestamp(ts).year
+                                        year_val = _dt.datetime.utcfromtimestamp(ts).year
                                     else:
                                         # likely already a year like 1907
                                         year_val = int(str(ts)[:4])
@@ -58,8 +62,12 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
                                         m = re.search(r"(18|19|20)\d{2}", f_raw)
                                         if m:
                                             year_val = int(m.group(0))
-                                if year_val and 1800 <= year_val <= datetime.utcnow().year:
-                                    t2["founded"] = year_val
+                                if year_val and 1800 <= year_val <= _dt.datetime.utcnow().year:
+                                    # DB kolona izgleda kao timestamptz -> šaljemo ISO (1 Jan) da izbjegnemo '2009' cast error
+                                    try:
+                                        t2["founded"] = f"{year_val:04d}-01-01T00:00:00Z"
+                                    except Exception:
+                                        t2["founded"] = None
                             except Exception:
                                 pass
                         t2.setdefault("venue", venue.get("name") or (venue.get("stadium") or {}).get("name"))
@@ -70,12 +78,39 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
         teams = enriched_teams
     if teams:
         counts["teams"] = db.upsert_teams(teams)
+        try:
+            uniq_in = len({t.get("sofascore_id") for t in _teams_input if t.get("sofascore_id")})
+            ok, fail = counts["teams"]
+            logger.info(f"[store][teams] batch_in={len(_teams_input)} unique_in={uniq_in} upsert_ok={ok} fail={fail}")
+            try:
+                logger.info(f"[store][teams][verify] db_count={db.table_count('teams')}")
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     # Maps for FK linking
     comp_map = db.get_competition_ids_by_sofa([c.get("sofascore_id") for c in comps]) if comps else {}
     team_map = db.get_team_ids_by_sofa([t.get("sofascore_id") for t in teams]) if teams else {}
 
     # 2) Players (inject team_id from team_sofascore_id) ---------------------
+    # Build auxiliary maps from lineups BEFORE processing players so we can assign
+    # missing team_sofascore_id and jersey number to player rows (some players only
+    # appear in lineups, not in raw team player arrays).
+    lineup_team_map: Dict[int, int] = {}
+    lineup_number_map: Dict[int, Any] = {}
+    try:
+        for lr in (bundle.get("lineups") or []):
+            psid = lr.get("player_sofascore_id")
+            tsid = lr.get("team_sofascore_id") or lr.get("team_id")
+            if isinstance(psid, int):
+                if isinstance(tsid, int) and psid not in lineup_team_map:
+                    lineup_team_map[psid] = tsid
+                jn = lr.get("jersey_number") or lr.get("jerseyNumber") or lr.get("number")
+                if jn is not None and psid not in lineup_number_map:
+                    lineup_number_map[psid] = jn
+    except Exception:
+        pass
     players_raw = bundle.get("players", []) or []
     # placeholder logic is handled earlier in legacy script; just map team ids here
     players: List[Dict[str, Any]] = []
@@ -92,8 +127,8 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
                     ts_int = int(ts_raw)
                     if ts_int > 10**12:  # ms -> s
                         ts_int //= 1000
-                    from datetime import datetime, timezone, timedelta
-                    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+                    from datetime import timezone, timedelta
+                    epoch = _dt.datetime(1970, 1, 1, tzinfo=timezone.utc)
                     dob_dt = epoch + timedelta(seconds=ts_int)
                     dob_str = dob_dt.date().isoformat()
                     p2["date_of_birth"] = dob_str
@@ -102,6 +137,12 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
                 except Exception:
                     pass
         tsid = p2.pop("team_sofascore_id", None)
+        # If missing team_sofascore_id but present in lineup map, set it now (so mapping below can translate to FK)
+        if tsid is None and p2.get("sofascore_id") in lineup_team_map:
+            tsid = lineup_team_map.get(p2.get("sofascore_id"))
+        # Fill missing jersey number from lineup if absent
+        if not p2.get("number") and p2.get("sofascore_id") in lineup_number_map:
+            p2["number"] = lineup_number_map.get(p2.get("sofascore_id"))
         # If legacy parse incorrectly set numeric team_id (sofascore) instead of FK UUID, remap
         raw_team_id = p2.get("team_id")
         if tsid is not None and tsid in team_map:
@@ -110,6 +151,16 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
             p2["team_id"] = team_map.get(raw_team_id)
         players.append(p2)
     if players:
+        # Pre-enrichment fill of missing team_id using lineup_player_team (if we built it later, safe even if empty now)
+        try:
+            if 'lineup_player_team' in locals():
+                for pl in players:
+                    if not pl.get('team_id'):
+                        sid = pl.get('sofascore_id')
+                        if isinstance(sid, int) and sid in lineup_player_team:
+                            pl['team_id'] = lineup_player_team[sid]
+        except Exception:
+            pass
         if browser is not None:
             enrich_player_details(browser, players, throttle=throttle)
             # Post-enrichment safety: još jednom konvertiraj raw timestamp ako je ostao
@@ -121,8 +172,8 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
                             ts_int = int(ts_raw)
                             if ts_int > 10**12:
                                 ts_int //= 1000
-                            from datetime import datetime, timezone as _tz
-                            pl["date_of_birth"] = datetime.utcfromtimestamp(ts_int).replace(tzinfo=_tz.utc).date().isoformat()
+                            from datetime import timezone as _tz
+                            pl["date_of_birth"] = _dt.datetime.utcfromtimestamp(ts_int).replace(tzinfo=_tz.utc).date().isoformat()
                         except Exception:
                             pass
         # Debug: log sample of player DOB fields coverage
@@ -174,15 +225,17 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
     match_rows: List[Dict[str, Any]] = []
     for m in bundle.get("matches", []) or []:
         m2 = dict(m)
-        comp_sofa = m2.pop("competition_sofascore_id", None)
+        comp_sofa = m2.get("competition_sofascore_id")
         if comp_sofa:
             m2["competition_id"] = comp_map.get(comp_sofa)
-        h_sofa = m2.pop("home_team_sofascore_id", None)
-        a_sofa = m2.pop("away_team_sofascore_id", None)
-        if h_sofa:
+        h_sofa = m2.get("home_team_sofascore_id")
+        a_sofa = m2.get("away_team_sofascore_id")
+        if h_sofa and not m2.get("home_team_id"):
             m2["home_team_id"] = team_map.get(h_sofa)
-        if a_sofa:
+        if a_sofa and not m2.get("away_team_id"):
             m2["away_team_id"] = team_map.get(a_sofa)
+        # ensure updated_at for status freshness
+        m2.setdefault("updated_at", _dt.datetime.utcnow().isoformat())
         match_rows.append(m2)
     if match_rows:
         # Info log to confirm venue presence before DB upsert
@@ -194,16 +247,102 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
         except Exception:
             pass
         counts["matches"] = db.batch_upsert_matches(match_rows)
+    else:
+        logger.debug("[store][matches] no match rows -> skipping match_state snapshot")
 
     # 5) Build map (source,source_event_id)->match_id -----------------------
-    match_map = db.get_match_ids_by_source_ids([("sofascore", m.get("source_event_id")) for m in match_rows]) if match_rows else {}
-    se_to_mid = {sid: mid for ((_, sid), mid) in match_map.items()}
+    # Build (source, source_event_id) -> match_id map (use real source if present; default 'sofascore')
+    match_map = db.get_match_ids_by_source_ids([
+        (m.get("source") or "sofascore", m.get("source_event_id"))
+        for m in match_rows if m.get("source_event_id") is not None
+    ]) if match_rows else {}
+    # Primary map keeps (source, source_event_id) tuple keys
+    se_to_mid = {(src, sid): mid for ((src, sid), mid) in match_map.items()}
+    # Legacy/simple map by just source_event_id (many downstream bundles only carry the numeric id)
+    se_to_mid_sid = {sid: mid for ((src, sid), mid) in match_map.items()}
+    try:
+        if match_rows:
+            sample_sid = next((m.get("source_event_id") for m in match_rows if m.get("source_event_id") is not None), None)
+            logger.debug(f"[store][match_map] built size={len(match_map)} sample_query_sid={sample_sid} sample_mid={match_map.get((match_rows[0].get('source') or 'sofascore', match_rows[0].get('source_event_id')))}")
+    except Exception:
+        pass
+
+    # Match state snapshot (status / minute / score) for historical/backfill parity
+    if match_rows:
+        try:
+            # High-level instrumentation so we SEE snapshot attempt even at INFO level
+            logger.info(f"[store][match_state] snapshot_start match_rows={len(match_rows)} map_size={len(match_map)}")
+            now_iso = _dt.datetime.utcnow().isoformat()
+            ms_rows: List[Dict[str, Any]] = []
+            missing_for_map: List[int] = []
+            for m in match_rows:
+                sid = m.get("source_event_id")
+                src = m.get("source") or "sofascore"
+                if sid is None:
+                    continue
+                mid = se_to_mid.get((src, sid))
+                if not mid:
+                    missing_for_map.append(sid)
+                    continue
+                ms_rows.append({
+                    "match_id": mid,
+                    "status": m.get("status"),
+                    "status_type": m.get("status_type") or m.get("status"),
+                    "minute": m.get("minute"),
+                    "home_score": m.get("home_score"),
+                    "away_score": m.get("away_score"),
+                    "updated_at": now_iso,
+                })
+            # Fallback: if we missed some due to mapping failure, try a direct select by source_event_id only
+            if missing_for_map:
+                try:
+                    client = getattr(db, 'client', None)
+                    if client:
+                        res = client.table('matches').select('id,source,source_event_id').in_('source_event_id', missing_for_map).execute()
+                        tmp_idx = {}
+                        for r in (res.data or []):
+                            try:
+                                tmp_idx[(r.get('source') or 'sofascore', int(r.get('source_event_id')))] = r.get('id')
+                            except Exception:
+                                pass
+                        recovered = 0
+                        for m in match_rows:
+                            sid = m.get('source_event_id'); src = m.get('source') or 'sofascore'
+                            if sid in missing_for_map and (src, sid) in tmp_idx:
+                                ms_rows.append({
+                                    "match_id": tmp_idx[(src, sid)],
+                                    "status": m.get("status"),
+                                    "status_type": m.get("status_type") or m.get("status"),
+                                    "minute": m.get("minute"),
+                                    "home_score": m.get("home_score"),
+                                    "away_score": m.get("away_score"),
+                                    "updated_at": now_iso,
+                                })
+                                recovered += 1
+                        if recovered:
+                            logger.debug(f"[store][match_state] recovered_mappings={recovered} from direct select")
+                except Exception as ex_fb:
+                    logger.debug(f"[store][match_state] fallback select failed: {ex_fb}")
+            if ms_rows:
+                # Promote snapshot size to INFO for visibility
+                try:
+                    statuses = {r.get('status') for r in ms_rows}
+                    logger.info(f"[store][match_state] prepared rows={len(ms_rows)} distinct_statuses={len(statuses)} sample_statuses={list(statuses)[:5]}")
+                except Exception:
+                    pass
+                logger.debug(f"[store][match_state] upserting rows={len(ms_rows)} sample={ms_rows[:1]}")
+                counts["match_state"] = db.upsert_match_state(ms_rows)
+            else:
+                logger.info(f"[store][match_state] no rows built (match_map_size={len(match_map)} missing={len(missing_for_map)})")
+        except Exception as ex_ms:
+            # Escalate to WARNING so we know snapshot failed
+            logger.warning(f"[store][match_state] snapshot failed err={ex_ms}")
 
     # Helper per-event side -> team_id
     side_team_cache: Dict[str, Dict[str,str]] = {}
     for m in match_rows:
         sid = m.get("source_event_id")
-        if sid in se_to_mid:
+        if sid in se_to_mid_sid:
             side_team_cache[str(sid)] = {"home": m.get("home_team_id"), "away": m.get("away_team_id")}
 
     # Build player id map once (post players upsert) for downstream FKs
@@ -217,9 +356,10 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
     # 6) Lineups ------------------------------------------------------------
     line_raw = bundle.get("lineups", []) or []
     line_rows: List[Dict[str, Any]] = []
+    lineup_player_team: Dict[int, str] = {}
     for r in line_raw:
         eid = r.get("source_event_id")
-        mid = se_to_mid.get(eid)
+        mid = se_to_mid_sid.get(eid)
         if not mid:
             continue
         team_id = None
@@ -239,6 +379,12 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
         psid = r.get("player_sofascore_id")
         if psid and psid in player_map:
             pr["player_id"] = player_map[psid]
+        # capture player->team mapping for starters (team_id available here)
+        try:
+            if psid and team_id and psid not in lineup_player_team:
+                lineup_player_team[psid] = team_id
+        except Exception:
+            pass
         line_rows.append(pr)
     if line_rows:
         logger.debug(f"[store] lineups in={len(line_raw)} mapped={len(line_rows)} sample={line_rows[:1]}")
@@ -249,7 +395,7 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
     form_rows: List[Dict[str, Any]] = []
     for r in form_raw:
         eid = r.get("source_event_id")
-        mid = se_to_mid.get(eid)
+        mid = se_to_mid_sid.get(eid)
         if not mid:
             continue
         team_id = None
@@ -273,7 +419,7 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
     ev_rows: List[Dict[str, Any]] = []
     for r in bundle.get("events", []) or []:
         eid = r.get("source_event_id")
-        mid = se_to_mid.get(eid)
+        mid = se_to_mid_sid.get(eid)
         if not mid:
             continue
         er = dict(r)
@@ -328,6 +474,12 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
         if placeholder_players:
             try:
                 logger.info(f"[store][shots] enriching missing shot players count={len(placeholder_players)} pids={missing_shot_pids[:8]}")
+                # Attempt to fetch details for placeholders (nationality, height, dob)
+                try:
+                    if browser is not None:
+                        enrich_player_details(browser, placeholder_players, throttle=throttle)
+                except Exception:
+                    pass
                 db.upsert_players(placeholder_players)
                 # refresh player_map with new inserts
                 try:
@@ -364,7 +516,7 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
         pass
     for r in bundle.get("shots", []) or []:
         eid = r.get("source_event_id")
-        mid = se_to_mid.get(eid)
+        mid = se_to_mid_sid.get(eid)
         if not mid:
             continue
         sr = dict(r)
@@ -446,7 +598,7 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
         pass
     for r in ap_raw:
         eid = r.get("source_event_id")
-        mid = se_to_mid.get(eid)
+        mid = se_to_mid_sid.get(eid)
         if not mid:
             continue
         ar = {k: v for k, v in r.items() if k != "source_event_id"}
@@ -476,7 +628,7 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
     ps_rows: List[Dict[str, Any]] = []
     for r in ps_raw:
         eid = r.get("source_event_id")
-        mid = se_to_mid.get(eid)
+        mid = se_to_mid_sid.get(eid)
         if not mid:
             continue
         pr = {k: v for k, v in r.items() if k != "source_event_id"}
@@ -503,7 +655,7 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
     ms_rows: List[Dict[str, Any]] = []
     for r in ms_raw:
         eid = r.get("source_event_id")
-        mid = se_to_mid.get(eid)
+        mid = se_to_mid_sid.get(eid)
         if not mid:
             continue
         mr = {k: v for k, v in r.items() if k != "source_event_id"}
@@ -529,6 +681,7 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
         missing_comp_sofa = set()
         missing_team_sofa = set()
         mapped_std: List[Dict[str, Any]] = []
+        pre_rows = len(std_rows)
         for r in std_rows:
             comp_sofa = r.get("competition_sofascore_id") or r.get("competition_id")
             team_sofa = r.get("team_sofascore_id") or r.get("team_id")
@@ -553,6 +706,11 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
         if mapped_std:
             logger.debug(f"[store] standings in={len(std_rows)} mapped={len(mapped_std)} sample={mapped_std[:1]}")
             counts["standings"] = db.upsert_standings(mapped_std)
+        else:
+            logger.debug(f"[store][standings] dropped_all pre={pre_rows} mapped=0 (missing_comp={len(missing_comp_sofa)} missing_team={len(missing_team_sofa)})")
+            # Extra verbose diagnostics: show a sample original row so we can inspect sofascore ids
+            if std_rows:
+                logger.debug(f"[store][standings] sample_original={std_rows[0]}")
 
     # 14) match_managers ----------------------------------------------------
     mm_raw = bundle.get("match_managers", []) or []
@@ -568,7 +726,7 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
                 mgr_map = {}
         for r in mm_raw:
             eid = r.get("source_event_id")
-            mid = se_to_mid.get(eid)
+            mid = se_to_mid_sid.get(eid)
             if not mid:
                 continue
             mgr_sofa = r.get("manager_sofascore_id") or r.get("manager_id")
@@ -587,5 +745,11 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
     if mm_rows:
         logger.debug(f"[store] match_managers in={len(mm_raw)} mapped={len(mm_rows)} sample={mm_rows[:1]}")
         counts["match_managers"] = db.upsert_match_managers(mm_rows)
+
+    # Final diagnostic summary so caller logs always show what we actually persisted
+    try:
+        logger.info("[store][summary] " + ", ".join(f"{k}={counts.get(k)}" for k in sorted(counts.keys())))
+    except Exception:
+        pass
 
     return counts

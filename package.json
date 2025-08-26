@@ -12,6 +12,8 @@
     "backend:continuous": "python scraper/fetch_loop.py",
     "build": "vite build",
     "preview": "vite preview",
+    "dev:frontend": "vite",
+    "dev:no-backend": "vite --host",
     "inspect": "vite build --mode development && vite-plugin-inspect",
     "analyze": "npm run build && npx vite-bundle-analyzer dist",
     "dev:profile": "vite --mode development --profile",

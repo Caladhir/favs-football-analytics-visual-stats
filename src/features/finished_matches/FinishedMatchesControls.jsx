@@ -104,19 +104,11 @@ export default function FinishedMatchesControls({
           </span>
         )}
 
-        {favoritesCount > 0 && (
-          <span className="bg-green-600 text-white px-2 py-1 rounded-full">
-            ❤️ {favoritesCount} Favorites
-          </span>
-        )}
-
         {/* Group toggle */}
         <GroupButton
           isGrouped={groupByCompetition}
           onToggle={() => setGroupByCompetition(!groupByCompetition)}
           size="sm"
-          groupedText="Grouped"
-          ungroupedText="Group"
         />
       </div>
     </div>

@@ -76,8 +76,17 @@ class EventsProcessor:
                     etype = "yellow_card"
             if raw_type == "substitution":
                 etype = "substitution"
-            if raw_type.startswith("goal") or raw_type == "goal":
+            # Only treat pure 'goal' (and variants explicitly mapped) as goal; avoid 'goalKick', 'goalkeeperSave', etc.
+            if raw_type == "goal":
                 etype = etype or "goal"
+            else:
+                # If something starts with 'goal' but isn't an actual scoring event, keep as generic event (debug log once per parse)
+                if str(raw_type).lower().startswith("goal") and raw_type.lower() not in {"goal","own_goal","goalpenalty","goalpen"}:
+                    # Leave etype as previously mapped (likely 'event')
+                    try:
+                        logger.debug(f"[events_processor][suspicious_goal_like] ev={ev_id} raw_type={raw_type} raw_class={raw_class}")
+                    except Exception:
+                        pass
             if raw_type in ("varDecision", "var"):
                 etype = "var"
             if not etype:

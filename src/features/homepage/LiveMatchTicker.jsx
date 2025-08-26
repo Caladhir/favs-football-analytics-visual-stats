@@ -1,5 +1,4 @@
-// src/features/homepage/LiveMatchTicker.jsx
-// ============================================
+// src/features/homepage/LiveMatchTicker.jsx - ENHANCED WITH SMOOTH ANIMATIONS
 import React, { useState, useEffect, useRef } from "react";
 import supabase from "../../services/supabase";
 
@@ -14,7 +13,7 @@ export default function LiveMatchTicker() {
   const tickerRef = useRef(null);
   const [scrollX, setScrollX] = useState(0);
 
-  // helper: normalize strings for comparison
+  // Helper: normalize strings for comparison
   const normalize = (s) =>
     String(s || "")
       .normalize("NFD")
@@ -43,7 +42,7 @@ export default function LiveMatchTicker() {
           console.warn("Error loading competitions for TOP25 mapping:", e);
         }
 
-        // 2) Fetch SofaScore rankings and build top150 set (use rowName / team.slug / team.name)
+        // 2) Fetch SofaScore rankings and build top150 set
         let top150Set = new Set();
         try {
           const r = await fetch(
@@ -65,7 +64,7 @@ export default function LiveMatchTicker() {
           console.error("Error fetching SofaScore rankings:", err);
         }
 
-        // 3) Fetch live/ht matches from supabase (broader set) and filter locally
+        // 3) Fetch live/ht matches from Supabase and filter locally
         const { data, error } = await supabase
           .from("matches")
           .select(
@@ -73,12 +72,12 @@ export default function LiveMatchTicker() {
           )
           .in("status", ["live", "ht"])
           .order("start_time", { ascending: false })
-          .limit(200); // fetch more, then filter down
+          .limit(200);
 
         if (error) {
           console.error("Supabase error:", error);
         } else if (data) {
-          // keep matches that are in top25 competitions OR involve a top150 team
+          // Keep matches that are in top25 competitions OR involve a top150 team
           const filtered = data.filter((m) => {
             if (m.competition_id && top25DbIds.has(m.competition_id))
               return true;
@@ -108,70 +107,127 @@ export default function LiveMatchTicker() {
     return () => clearInterval(interval);
   }, []);
 
-  // Smooth scroll
+  // Smooth continuous scroll animation
   useEffect(() => {
-    let raf;
-    const speed = 0.5; // px per frame
+    if (matches.length === 0) return;
+
+    let animationId;
+    const speed = 0.8; // Pixels per frame
+
     const animate = () => {
       setScrollX((prev) => {
-        const width = tickerRef.current?.scrollWidth || 0;
-        return width === 0 ? 0 : (prev + speed) % width;
+        const element = tickerRef.current;
+        if (!element) return prev;
+
+        const contentWidth = element.scrollWidth / 2; // Divided by 2 because we duplicate content
+        const newX = prev + speed;
+
+        // Reset when we've scrolled through one complete set
+        return newX >= contentWidth ? 0 : newX;
       });
-      raf = requestAnimationFrame(animate);
+      animationId = requestAnimationFrame(animate);
     };
-    raf = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(raf);
+
+    animationId = requestAnimationFrame(animate);
+    return () => {
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+      }
+    };
   }, [matches]);
 
   if (loading) {
     return (
-      <div className="h-10 bg-black/20 backdrop-blur-sm border-y border-red-500/20 animate-pulse" />
+      <section className="relative z-10 py-4 overflow-hidden">
+        <div className="bg-gradient-to-r from-red-600/15 via-red-500/25 to-red-600/15 backdrop-blur-sm border-y border-red-500/20 animate-pulse">
+          <div className="h-12 flex items-center justify-center">
+            <span className="text-sm text-gray-400">
+              Loading live matches...
+            </span>
+          </div>
+        </div>
+      </section>
     );
   }
 
   if (matches.length === 0) {
     return (
-      <div className="h-10 bg-black/20 backdrop-blur-sm border-y border-red-500/20 flex items-center justify-center">
-        <span className="text-sm text-gray-400">
-          Nema live utakmica u top 25 liga trenutno
-        </span>
-      </div>
+      <section className="relative z-10 py-4 overflow-hidden">
+        <div className="bg-gradient-to-r from-red-600/15 via-red-500/25 to-red-600/15 backdrop-blur-sm border-y border-red-500/20">
+          <div className="h-12 flex items-center justify-center">
+            <span className="text-sm text-gray-400">
+              No live matches in top leagues currently
+            </span>
+          </div>
+        </div>
+      </section>
     );
   }
 
   return (
-    <div className="overflow-hidden relative h-10 bg-black/20 backdrop-blur-sm border-y border-red-500/20">
-      <div
-        ref={tickerRef}
-        className="flex items-center h-full whitespace-nowrap"
-        style={{ transform: `translateX(-${scrollX}px)`, transition: "none" }}
-      >
-        {[...matches, ...matches].map((match, i) => (
-          <div key={i} className="inline-flex items-center mx-8">
-            <span
-              className={`w-2 h-2 rounded-full mr-2 ${
-                match.status === "live"
-                  ? "bg-red-500 animate-pulse"
-                  : "bg-yellow-500"
-              }`}
-            />
-            <span className="text-sm text-white">
-              {match.home}
-              <span
-                className={`font-bold mx-2 ${
-                  match.status === "live" ? "text-red-400" : "text-gray-400"
-                }`}
+    <section className="relative z-10 py-4 overflow-hidden w-full">
+      <div className="bg-gradient-to-r from-red-600/15 via-red-500/25 to-red-600/15 backdrop-blur-sm border-y border-red-500/30">
+        {/* Animated ticker */}
+        <div className="relative h-12 overflow-hidden w-full">
+          <div
+            ref={tickerRef}
+            className="flex items-center h-full whitespace-nowrap absolute left-0"
+            style={{
+              transform: `translateX(-${scrollX}px)`,
+              willChange: "transform",
+              minWidth: "max-content",
+            }}
+          >
+            {/* Duplicate content for seamless loop */}
+            {[...matches, ...matches].map((match, index) => (
+              <div
+                key={`${match.home}-${match.away}-${index}`}
+                className="flex items-center mx-8 flex-shrink-0"
               >
-                {match.score}
-              </span>
-              {match.away}
-              {match.status === "ht" && (
-                <span className="ml-2 text-xs text-yellow-400">HT</span>
-              )}
-            </span>
+                {/* Status indicator */}
+                <div className="flex items-center mr-4">
+                  <div
+                    className={`w-2 h-2 rounded-full mr-2 ${
+                      match.status === "live"
+                        ? "bg-red-500 animate-pulse shadow-lg shadow-red-500/50"
+                        : "bg-yellow-500 animate-pulse shadow-lg shadow-yellow-500/50"
+                    }`}
+                  />
+                  <span className="text-xs font-bold text-white/60 uppercase tracking-wider">
+                    {match.status === "live" ? "LIVE" : "HT"}
+                  </span>
+                </div>
+
+                {/* Match info */}
+                <div className="text-sm font-semibold">
+                  <span className="text-white hover:text-red-300 transition-colors">
+                    {match.home}
+                  </span>
+                  <span
+                    className={`mx-3 font-bold px-2 py-1 rounded ${
+                      match.status === "live"
+                        ? "text-red-300 bg-red-500/20"
+                        : "text-yellow-300 bg-yellow-500/20"
+                    }`}
+                  >
+                    {match.score}
+                  </span>
+                  <span className="text-white hover:text-red-300 transition-colors">
+                    {match.away}
+                  </span>
+                </div>
+
+                {/* Separator */}
+                <div className="mx-6 w-px h-6 bg-red-500/30" />
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
+
+        {/* Fade edges for smooth appearance */}
+        <div className="absolute top-0 left-0 w-20 h-full bg-gradient-to-r from-black/50 to-transparent pointer-events-none" />
+        <div className="absolute top-0 right-0 w-20 h-full bg-gradient-to-l from-black/50 to-transparent pointer-events-none" />
       </div>
-    </div>
+    </section>
   );
 }

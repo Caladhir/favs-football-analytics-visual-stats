@@ -84,8 +84,33 @@ class MatchProcessor:
             events.extend(event_rows)
             sub_in_ids = {er.get("player_in_sofascore_id") for er in event_rows if er.get("event_type") == "substitution" and er.get("player_in_sofascore_id")}
             sub_out_ids = {er.get("player_out_sofascore_id") for er in event_rows if er.get("event_type") == "substitution" and er.get("player_out_sofascore_id")}
+            # Goal counts per side (for score anomaly diagnostics / potential correction)
+            goal_counts = {"home": 0, "away": 0}
+            goal_events_detail = []  # collect (side, minute, player_sofa_id, assist_sofa_id, event_type)
+            try:
+                for er in event_rows:
+                    if er.get("event_type") in {"goal", "own_goal"}:
+                        side = er.get("team")
+                        if side in goal_counts:
+                            goal_counts[side] += 1
+                            if len(goal_events_detail) < 20:  # cap to avoid huge log
+                                goal_events_detail.append({
+                                    "side": side,
+                                    "minute": er.get("minute"),
+                                    "player": er.get("player_sofascore_id"),
+                                    "assist": er.get("assist_player_sofascore_id"),
+                                    "etype": er.get("event_type"),
+                                })
+            except Exception:
+                pass
 
             # Status & time
+            # Raw scoreboard values (prefer these absolutely; they have been reliable)
+            try:
+                raw_home_current = (base.get("homeScore") or {}).get("current")
+                raw_away_current = (base.get("awayScore") or {}).get("current")
+            except Exception:
+                raw_home_current = raw_away_current = None
             stat = status_processor.parse(base)
             try:
                 raw_status_desc = (base.get("status") or {}).get("description") or (base.get("status") or {}).get("type") or base.get("statusType")
@@ -137,6 +162,19 @@ class MatchProcessor:
             except Exception:
                 pass
 
+            # Direktan zapis: uvijek uzmi raw homeScore.current / awayScore.current ako postoje (bez korekcija).
+            # Ako raw nisu dostupni (None), fallback na status_processor vrijednosti.
+            eff_home_score = raw_home_current if raw_home_current is not None else stat.get("home_score")
+            eff_away_score = raw_away_current if raw_away_current is not None else stat.get("away_score")
+            # (Ne primjenjuj nikakve goal-count korekcije; samo eventualno logiraj razliku radi dijagnostike.)
+            try:
+                if raw_home_current is not None and stat.get("home_score") is not None and raw_home_current != stat.get("home_score"):
+                    _mp_logger.debug(f"[match_processor][score_discrepancy] ev={ev_id} raw_home_current={raw_home_current} stat_home={stat.get('home_score')}")
+                if raw_away_current is not None and stat.get("away_score") is not None and raw_away_current != stat.get("away_score"):
+                    _mp_logger.debug(f"[match_processor][score_discrepancy] ev={ev_id} raw_away_current={raw_away_current} stat_away={stat.get('away_score')}")
+            except Exception:
+                pass
+
             matches.append({
                 "source": "sofascore",
                 "source_event_id": ev_id,
@@ -146,12 +184,12 @@ class MatchProcessor:
                 "away_team": (base.get("awayTeam") or {}).get("name"),
                 "home_team_sofascore_id": home_tid,
                 "away_team_sofascore_id": away_tid,
-                "home_score": stat.get("home_score"),
-                "away_score": stat.get("away_score"),
+                "home_score": eff_home_score,
+                "away_score": eff_away_score,
                 "home_score_ht": stat.get("home_score_ht"),
                 "away_score_ht": stat.get("away_score_ht"),
-                "final_home_score": stat.get("home_score") if is_finished else None,
-                "final_away_score": stat.get("away_score") if is_finished else None,
+                "final_home_score": eff_home_score if is_finished else None,
+                "final_away_score": eff_away_score if is_finished else None,
                 "competition_sofascore_id": (comp or {}).get("sofascore_id"),
                 "competition": comp_name,
                 "round": base.get("roundInfo", {}).get("round") if isinstance(base.get("roundInfo"), dict) else base.get("round"),
@@ -163,6 +201,30 @@ class MatchProcessor:
                 "current_period_start": current_period_start,
                 "is_finished": is_finished,
             })
+
+            # Log anomaly detection AFTER appending (so stored values visible) but only once per match
+            # Uklonjena goal-count korekcija; opcionalni debug usporedbe više nije potreban za isključivo raw zapis.
+
+            # Ensure ALL players from events (including subs and assists) are registered
+            try:
+                ev_player_ids = set()
+                for er in event_rows:
+                    for key in ("player_sofascore_id","assist_player_sofascore_id","player_in_sofascore_id","player_out_sofascore_id"):
+                        pid = er.get(key)
+                        if isinstance(pid, int):
+                            ev_player_ids.add(pid)
+                for pid in ev_player_ids:
+                    if pid not in players:
+                        side_guess = None
+                        # crude: if any goal/other event with this pid has team side, reuse
+                        for er in event_rows:
+                            if er.get("player_sofascore_id") == pid and er.get("team"):
+                                side_guess = er.get("team")
+                                break
+                        team_sid = home_tid if side_guess == "home" else away_tid if side_guess == "away" else None
+                        players[pid] = {"sofascore_id": pid, "full_name": f"Player {pid}", "team_sofascore_id": team_sid}
+            except Exception:
+                pass
 
             # Player & match stats
             raw_lineups = enriched.get("_raw_lineups") or {}
@@ -282,6 +344,17 @@ class MatchProcessor:
                     except Exception:
                         pass
                     shots.extend(parsed_shots)
+                    # Add shot players (and assists) if missing
+                    try:
+                        for sh in parsed_shots:
+                            for key in ("player_sofascore_id","assist_player_sofascore_id"):
+                                spid = sh.get(key)
+                                if isinstance(spid, int) and spid not in players:
+                                    side = sh.get("team") or sh.get("team_side")
+                                    team_sid = home_tid if side == "home" else away_tid if side == "away" else None
+                                    players[spid] = {"sofascore_id": spid, "full_name": f"Player {spid}", "team_sofascore_id": team_sid}
+                    except Exception:
+                        pass
                 except Exception:
                     pass
             raw_avg = enriched.get("_raw_avg_positions")
@@ -317,6 +390,20 @@ class MatchProcessor:
             _mp_logger.info(
                 f"[match_processor][venue_summary] resolved={venue_ok_count} missing={len(venue_missing)} total={len(enriched_events)} missing_ids={venue_missing[:10]}"
             )
+            # Competition ID coverage summary
+            try:
+                uniq_ut = sum(1 for c in competitions.values() if c.get("unique_tournament_id"))
+                uniq_tid = sum(1 for c in competitions.values() if c.get("season_tournament_id"))
+                _mp_logger.info(f"[match_processor][competition_ids] competitions={len(competitions)} unique_ids={uniq_ut} season_ids={uniq_tid}")
+            except Exception:
+                pass
+            try:
+                expected_teams = len(enriched_events) * 2
+                _mp_logger.info(
+                    f"[match_processor][team_summary] unique_teams={len(teams)} expected≈{expected_teams} delta={expected_teams - len(teams)}"
+                )
+            except Exception:
+                pass
         except Exception:
             pass
 

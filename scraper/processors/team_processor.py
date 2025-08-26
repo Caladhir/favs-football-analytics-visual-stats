@@ -8,6 +8,11 @@ class TeamProcessor:
     def parse_teams(self, event: Dict[str, Any], enriched: Dict[str, Any]) -> List[Dict[str, Any]]:
         e = event
         teams = []
+    # NOTE: Očekuješ 2 * broj_utakmica timova. Ako vidiš manji broj (npr. 403 umjesto 406)
+    # uzrok može biti: (1) event bez home/awayTeam strukture (posebni tip / otkazan),
+    # (2) duplicat ID pa upsert normalizira (broj upisanih != broj procesiranih),
+    # (3) parse fallback generirao 'Team <id>' ali id nije int -> preskočen. Ovdje držimo
+    # fallback generiranje naziva i id parsiranje defenzivno.
 
         def _one(side: str):
             t = (e.get(f"{side}Team") or {}) if isinstance(e.get(f"{side}Team"), dict) else {}

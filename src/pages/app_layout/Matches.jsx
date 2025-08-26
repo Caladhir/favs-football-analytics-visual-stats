@@ -1,8 +1,8 @@
-// src/pages/app_layout/Matches.jsx
+// src/pages/app_layout/Matches.jsx - REDESIGNED WITH HOMEPAGE STYLING
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useLiveMatches } from "../../hooks/useLiveMatches";
-import useMatchesByDate from "../../hooks/useMatchesByDate";
+import AnimatedBackground from "../../features/homepage/AnimatedBackground";
 
 import AllMatches from "../../features/tabs/AllMatches";
 import LiveMatches from "../../features/tabs/LiveMatches";
@@ -10,10 +10,30 @@ import UpcomingMatches from "../../features/tabs/UpcomingMatches";
 import FinishedMatches from "../../features/tabs/FinishedMatches";
 
 const TABS = {
-  all: { component: AllMatches, label: "All", icon: "📅" },
-  live: { component: LiveMatches, label: "Live", icon: "🔴" },
-  upcoming: { component: UpcomingMatches, label: "Upcoming", icon: "⏰" },
-  finished: { component: FinishedMatches, label: "Finished", icon: "✅" },
+  all: {
+    component: AllMatches,
+    label: "All",
+    icon: "📅",
+    color: "from-gray-500/20 to-gray-600/30",
+  },
+  live: {
+    component: LiveMatches,
+    label: "Live",
+    icon: "🔴",
+    color: "from-red-500/20 to-red-600/30",
+  },
+  upcoming: {
+    component: UpcomingMatches,
+    label: "Upcoming",
+    icon: "⏰",
+    color: "from-blue-500/20 to-blue-600/30",
+  },
+  finished: {
+    component: FinishedMatches,
+    label: "Finished",
+    icon: "✅",
+    color: "from-green-500/20 to-green-600/30",
+  },
 };
 
 export default function Matches() {
@@ -21,6 +41,7 @@ export default function Matches() {
   const navigate = useNavigate();
   const isFirstRender = useRef(true);
   const [loadedTabs, setLoadedTabs] = useState(new Set());
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const { matches: liveMatches } = useLiveMatches();
 
@@ -53,7 +74,7 @@ export default function Matches() {
   const [tab, setTab] = useState(() => getCurrentTab());
 
   const handleTabChange = (newTab) => {
-    console.log("🔄 Tab change:", tab, "→", newTab);
+    console.log("🔥 Tab change:", tab, "→", newTab);
 
     setLoadedTabs((prev) => new Set([...prev, newTab]));
     setTab(newTab);
@@ -65,7 +86,7 @@ export default function Matches() {
   useEffect(() => {
     const currentTab = getCurrentTab();
     if (currentTab !== tab) {
-      console.log("🔄 Updating tab state:", tab, "→", currentTab);
+      console.log("🔥 Updating tab state:", tab, "→", currentTab);
       setTab(currentTab);
       setLoadedTabs((prev) => new Set([...prev, currentTab]));
     }
@@ -85,7 +106,11 @@ export default function Matches() {
     }
   }, [tab, liveMatchesCount]);
 
-  const renderTabButton = (key, { label, icon }) => {
+  useEffect(() => {
+    setIsLoaded(true);
+  }, []);
+
+  const renderTabButton = (key, { label, icon, color }) => {
     const isActive = tab === key;
     const showLiveCount = key === "live" && liveMatchesCount > 0;
 
@@ -94,39 +119,40 @@ export default function Matches() {
         key={key}
         onClick={() => handleTabChange(key)}
         className={`
-          relative px-5 py-3 rounded-xl font-semibold transition-all duration-200 ease-out
-          transform hover:scale-105 active:scale-95
-          flex items-center gap-3 min-w-[120px] justify-center
+          group relative px-6 py-4 rounded-2xl font-semibold transition-all duration-300 ease-out
+          transform hover:scale-105 active:scale-95 hover:shadow-2xl
+          flex items-center gap-3 min-w-[140px] justify-center
           ${
             isActive
-              ? "bg-gradient-to-r from-primary to-primary/80 text-primary-foreground shadow-lg shadow-primary/25"
-              : "bg-muted text-muted-foreground hover:bg-primary/10 hover:text-foreground"
+              ? "bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg shadow-red-500/25 border border-red-400/50"
+              : `bg-gradient-to-br ${color} backdrop-blur-sm text-gray-300 hover:text-white border border-white/10 hover:border-red-500/40`
           }
         `}
       >
-        {isActive && (
-          <span className="absolute inset-0 bg-white/10 rounded-xl animate-pulse" />
-        )}
+        {/* Background glow effect */}
+        <div
+          className={`absolute inset-0 rounded-2xl transition-opacity duration-300 ${
+            isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          } bg-gradient-to-r from-red-500/20 to-red-600/20 blur-xl -z-10`}
+        />
 
-        <span className="relative flex items-center gap-2">
+        <span className="relative flex items-center gap-3">
           <span
-            className={`text-lg transition-transform duration-200 ${
-              isActive ? "scale-110" : ""
+            className={`text-xl transition-all duration-300 ${
+              isActive ? "scale-110 animate-pulse" : "group-hover:scale-110"
             }`}
           >
             {icon}
           </span>
-          <span>{label}</span>
+          <span className="font-bold">{label}</span>
           {showLiveCount && (
-            <span className="bg-red-500 text-white text-xs px-2 py-1 rounded-full animate-pulse font-bold shadow-lg">
+            <span className="bg-white text-red-600 text-xs px-2 py-1 rounded-full animate-pulse font-bold shadow-lg">
               {liveMatchesCount}
             </span>
           )}
         </span>
 
-        {isActive && (
-          <span className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-primary-foreground rounded-full shadow-lg" />
-        )}
+        {isActive && <div className="" />}
       </button>
     );
   };
@@ -135,10 +161,16 @@ export default function Matches() {
     const isLoaded = loadedTabs.has(tab);
     if (!isLoaded) {
       return (
-        <div className="flex justify-center items-center min-h-[200px]">
+        <div className="flex justify-center items-center min-h-[400px]">
           <div className="text-center">
-            <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"></div>
-            <p className="text-muted-foreground">Loading {tab} matches...</p>
+            <div className="relative">
+              <div className="animate-spin w-12 h-12 border-4 border-red-500/30 border-t-red-500 rounded-full mx-auto mb-4"></div>
+              <div className="absolute inset-0 animate-ping w-12 h-12 border-4 border-red-500/20 rounded-full mx-auto opacity-20"></div>
+            </div>
+            <p className="text-gray-300 font-semibold">
+              Loading {tab} matches...
+            </p>
+            <p className="text-gray-500 text-sm mt-2">Fetching latest data</p>
           </div>
         </div>
       );
@@ -159,7 +191,7 @@ export default function Matches() {
 
   useEffect(() => {
     if (import.meta.env.DEV) {
-      console.log("🔍 Matches.jsx Debug Info:", {
+      console.log("⚽ Matches.jsx Debug Info:", {
         currentTab: tab,
         liveMatchesCount,
         totalLiveMatches: liveMatches?.length || 0,
@@ -168,39 +200,99 @@ export default function Matches() {
   }, [tab, liveMatchesCount, liveMatches]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <section className="text-center mt-6 mb-2">
-        <h1 className="text-4xl font-black text-primary text-outline">
-          Matches
-        </h1>
-        <p className="text-muted-foreground mt-2 text-sm">
-          Follow matches by status
-          {liveMatchesCount > 0 && (
-            <span className="ml-2 text-red-500 font-medium">
-              • {liveMatchesCount} Live Now
-            </span>
-          )}
-        </p>
+    <main className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-red-950 text-white overflow-x-hidden relative ">
+      <AnimatedBackground />
+
+      {/* Hero Header */}
+      <section
+        className={`relative z-10 text-center pt-12 pb-8 px-6 transition-all duration-1000 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
+        }`}
+      >
+        <div className="mb-8">
+          <h1 className="font-black text-6xl md:text-7xl mb-4 text-red-500 animate-pulse-slow">
+            Matches
+          </h1>
+          <p className="text-xl md:text-2xl text-gray-300 font-light tracking-wider mb-2">
+            Football Analytics & Live Tracking
+          </p>
+          <p className="text-lg text-gray-400 max-w-2xl mx-auto">
+            Follow matches by status and get real-time updates
+            {liveMatchesCount > 0 && (
+              <span className="block mt-10 text-red-400 font-semibold animate-pulse">
+                • {liveMatchesCount} Live Now
+              </span>
+            )}
+          </p>
+        </div>
       </section>
 
-      <div className="flex justify-center gap-3 mt-8 mb-6 px-4">
-        <div className="flex gap-2 p-2 bg-muted/50 rounded-2xl backdrop-blur-sm">
+      {/* Enhanced Tab Navigation */}
+      <div
+        className={`relative z-10 flex justify-center px-6 mb-8 transition-all duration-700 delay-300 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
+        }`}
+      >
+        <div className="flex flex-wrap justify-center gap-4 p-4 bg-gradient-to-r from-black/40 via-gray-900/60 to-black/40 backdrop-blur-sm rounded-3xl border border-red-500/20 shadow-2xl">
           {Object.entries(TABS).map(([key, tabInfo]) =>
             renderTabButton(key, tabInfo)
           )}
         </div>
       </div>
 
+      {/* Content Area */}
+      <div
+        className={`relative z-10 px-6 transition-all duration-700 delay-500 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
+        }`}
+      >
+        <div className="max-w-7xl mx-auto">{renderActiveTab()}</div>
+      </div>
+
+      {/* Debug Info - Development Only */}
       {import.meta.env.DEV && (
-        <div className="fixed top-13 right-4 bg-black text-white p-3 rounded text-xs z-50">
-          <div className="font-bold mb-2">🔴 Live Debug</div>
-          <div>Tab: {tab}</div>
-          <div>Live Count: {liveMatchesCount}</div>
-          <div>Time: {new Date().toLocaleTimeString()}</div>
+        <div className="fixed top-16 right-4 bg-black/80 backdrop-blur-sm text-white p-4 rounded-xl text-xs z-50 border border-red-500/30">
+          <div className="font-bold mb-2 text-red-400">🔴 Live Debug</div>
+          <div className="space-y-1">
+            <div>
+              Tab: <span className="text-blue-400">{tab}</span>
+            </div>
+            <div>
+              Live Count:{" "}
+              <span className="text-red-400">{liveMatchesCount}</span>
+            </div>
+            <div>
+              Loaded Tabs:{" "}
+              <span className="text-green-400">
+                {[...loadedTabs].join(", ")}
+              </span>
+            </div>
+            <div>
+              Time:{" "}
+              <span className="text-gray-400">
+                {new Date().toLocaleTimeString()}
+              </span>
+            </div>
+          </div>
         </div>
       )}
 
-      <div className="relative">{renderActiveTab()}</div>
-    </div>
+      {/* CSS Animations */}
+      <style jsx>{`
+        @keyframes pulse-slow {
+          0%,
+          100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.8;
+          }
+        }
+
+        .animate-pulse-slow {
+          animation: pulse-slow 3s ease-in-out infinite;
+        }
+      `}</style>
+    </main>
   );
 }

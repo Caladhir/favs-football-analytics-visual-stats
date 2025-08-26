@@ -30,6 +30,12 @@ except Exception:  # pragma: no cover
 
 from pipeline import fetch_day, enrich_event, store_bundle, build_standings
 from processors.match_processor import MatchProcessor
+from core.config import SOFA_TOURNAMENTS_ALLOW
+try:  # optional enhanced name-based filter
+    from utils.leagues_filter import should_track_match  # type: ignore
+except Exception:  # pragma: no cover
+    def should_track_match(_: dict) -> bool:  # type: ignore
+        return True
 
 logger = get_logger(__name__)
 
@@ -57,6 +63,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--throttle", type=float, default=0.0, help="Sleep seconds after each network call")
     p.add_argument("--dry-run", action="store_true", help="Do not persist – just log bundle sizes")
     p.add_argument("--max-events-per-day", type=int, help="Cap number of events per day (debug / speed)")
+    p.add_argument("--tournaments", type=str, help="Comma-separated uniqueTournament IDs allowlist (overrides env)")
     return p.parse_args()
 
 
@@ -83,6 +90,33 @@ def run_day(browser: Browser, processor: MatchProcessor, day: datetime, *, throt
     if not events:
         logger.info(f"[day] {dstr} events=0")
         return {}
+    # Apply tournament allow-list (CLI overrides env)
+    allow = None
+    try:
+        allow = getattr(run_day, "_allow_cache", None)
+    except Exception:
+        allow = None
+    if allow is None:
+        allow = getattr(run_day, "_allow_ids", None)
+    # allow is injected in main before loop via function attribute
+    if getattr(run_day, "_allow_ids", None):
+        def _ut(ev):
+            try:
+                return int((ev.get("tournament") or {}).get("uniqueTournament", {}).get("id"))
+            except Exception:
+                return None
+        before = len(events)
+        # Keep event if ID in allow_ids OR (fallback) passes name-based tracking
+        allow_ids = run_day._allow_ids  # type: ignore[attr-defined]
+        events = [ev for ev in events if (_ut(ev) in allow_ids) or should_track_match(ev)]
+        if before != len(events):
+            logger.info(f"[allowlist] filtered events {before}->{len(events)} (allow_ids+name_fallback)")
+    else:
+        # No explicit IDs -> rely purely on name-based decision
+        before = len(events)
+        events = [ev for ev in events if should_track_match(ev)]
+        if before != len(events):
+            logger.info(f"[allowlist] name-only filtered events {before}->{len(events)}")
     if max_events and len(events) > max_events:
         events = events[:max_events]
     enriched = []
@@ -115,6 +149,19 @@ def main():
     start, end = resolve_range(args)
     days = daterange(start, end)
     logger.info(f"[init] range {start.date()} -> {end.date()} days={len(days)} dry_run={args.dry_run}")
+
+    # Resolve allow-list (CLI overrides env SOFA_TOURNAMENTS_ALLOW)
+    allow_ids = set()
+    if args.tournaments:
+        try:
+            allow_ids = {int(x) for x in args.tournaments.split(",") if x.strip().isdigit()}
+        except Exception:
+            allow_ids = set()
+    elif SOFA_TOURNAMENTS_ALLOW:
+        allow_ids = set(SOFA_TOURNAMENTS_ALLOW)
+    if allow_ids:
+        logger.info(f"[allowlist] active uniqueTournament ids count={len(allow_ids)} sample={list(allow_ids)[:8]}")
+        setattr(run_day, "_allow_ids", allow_ids)
 
     browser = Browser()
     processor = MatchProcessor()

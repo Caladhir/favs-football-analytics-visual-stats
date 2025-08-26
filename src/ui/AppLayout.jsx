@@ -6,7 +6,7 @@ export default function AppLayout() {
   return (
     <>
       <Header />
-      <main className="pt-4 px-2 sm:px-6 lg:px-8">
+      <main>
         <Outlet />
       </main>
       <ScrollToTop />

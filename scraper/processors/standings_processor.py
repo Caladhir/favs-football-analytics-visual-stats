@@ -156,6 +156,7 @@ class StandingsProcessor:
                 "competition_sofascore_id": int(comp_sofa_id),
                 "season": season_str,
                 "team_sofascore_id": int(team_sofa),
+                "team_name": (team.get("name") if isinstance(team, dict) else None),
                 "rank": rank,
                 "played": played,
                 "wins": wins,

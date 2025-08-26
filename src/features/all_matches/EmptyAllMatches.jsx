@@ -1,4 +1,4 @@
-// src/features/all_matches/EmptyAllMatches.jsx - CONSISTENT WITH OTHER EMPTY STATES
+// src/features/all_matches/EmptyAllMatches.jsx - REDESIGNED WITH MODERN STYLING
 import CalendarPopover from "../tabs/CalendarPopover";
 
 export default function EmptyAllMatches({
@@ -33,15 +33,9 @@ export default function EmptyAllMatches({
   };
 
   const getEmptyMessage = () => {
-    if (isToday()) {
-      return "No matches today";
-    }
-    if (isYesterday()) {
-      return "No matches yesterday";
-    }
-    if (isTomorrow()) {
-      return "No matches tomorrow";
-    }
+    if (isToday()) return "No matches today";
+    if (isYesterday()) return "No matches yesterday";
+    if (isTomorrow()) return "No matches tomorrow";
     return "No matches found";
   };
 
@@ -71,26 +65,30 @@ export default function EmptyAllMatches({
         date: today,
         disabled: isToday(),
         icon: "📅",
+        color: "from-blue-500 to-blue-600",
       },
       {
         label: "Yesterday",
         date: yesterday,
         disabled: isYesterday(),
         icon: "🌅",
+        color: "from-orange-500 to-orange-600",
       },
       {
         label: "Tomorrow",
         date: tomorrow,
         disabled: isTomorrow(),
         icon: "🌄",
+        color: "from-purple-500 to-purple-600",
       },
     ];
   };
 
   return (
-    <div className="min-h-screen bg-muted rounded-3xl p-1">
-      <div className="flex justify-center my-4">
-        <div className="bg-gray-600 text-white px-4 py-2 rounded-full text-sm font-medium">
+    <div className="relative min-h-screen">
+      {/* Status Badge */}
+      <div className="flex justify-center pt-6">
+        <div className="bg-gradient-to-r from-gray-700 to-gray-800 text-white px-6 py-3 rounded-full text-sm font-bold shadow-lg backdrop-blur-sm border border-gray-600/30">
           📅 All Matches
         </div>
       </div>
@@ -98,30 +96,42 @@ export default function EmptyAllMatches({
       {/* Date picker */}
       <CalendarPopover date={selectedDate} setDate={setSelectedDate} />
 
-      <div className="text-center mt-12">
-        <div className="text-6xl mb-4">📅</div>
-        <p className="text-foreground font-black text-2xl mb-2">
+      {/* Empty State Content */}
+      <div className="text-center mt-16 px-6">
+        {/* Icon */}
+        <div className="mb-8">
+          <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-gradient-to-br from-red-500/20 to-red-600/30 backdrop-blur-sm border border-red-500/30 mb-6">
+            <span className="text-6xl">📅</span>
+          </div>
+        </div>
+
+        {/* Main message */}
+        <h2 className="text-4xl font-black text-white mb-4 bg-gradient-to-r from-red-400 via-white to-red-400 bg-clip-text text-transparent">
           {getEmptyMessage()}
-        </p>
-        <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+        </h2>
+
+        <p className="text-lg text-gray-300 mb-8 max-w-2xl mx-auto leading-relaxed">
           {getSuggestion()}
         </p>
 
         {/* Quick date actions */}
-        <div className="flex justify-center gap-3 mb-6">
+        <div className="flex flex-wrap justify-center gap-4 mb-8">
           {getQuickActions().map((action) => (
             <button
               key={action.label}
               onClick={() => setSelectedDate(action.date)}
               disabled={action.disabled}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+              className={`group relative overflow-hidden px-6 py-4 rounded-xl font-semibold transition-all duration-300 flex items-center gap-3 min-w-[140px] justify-center shadow-lg hover:shadow-2xl ${
                 action.disabled
-                  ? "bg-gray-600 text-gray-300 cursor-not-allowed"
-                  : "bg-primary text-white hover:bg-primary/80"
+                  ? "bg-gradient-to-r from-gray-700/50 to-gray-800/50 text-gray-400 cursor-not-allowed border border-gray-600/30"
+                  : `bg-gradient-to-r ${action.color} text-white hover:scale-105 border border-white/20 hover:border-white/40`
               }`}
             >
-              <span>{action.icon}</span>
-              {action.label}
+              {!action.disabled && (
+                <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+              )}
+              <span className="text-xl">{action.icon}</span>
+              <span className="relative z-10">{action.label}</span>
             </button>
           ))}
         </div>
@@ -129,10 +139,23 @@ export default function EmptyAllMatches({
         {/* Refresh button */}
         <button
           onClick={onRefresh}
-          className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+          className="group relative overflow-hidden bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold px-8 py-4 rounded-xl transition-all duration-300 hover:scale-105 shadow-lg hover:shadow-2xl hover:shadow-red-500/40"
         >
-          🔄 Refresh Data
+          <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          <span className="relative z-10 flex items-center gap-2">
+            <span>🔄</span>
+            Refresh Data
+          </span>
         </button>
+
+        {/* Additional info */}
+        <div className="mt-12 p-6 bg-gradient-to-r from-gray-800/40 via-gray-900/60 to-gray-800/40 backdrop-blur-sm rounded-2xl border border-gray-700/30 max-w-2xl mx-auto">
+          <h3 className="text-lg font-bold text-white mb-3">💡 Tip</h3>
+          <p className="text-gray-300 text-sm leading-relaxed">
+            Try selecting different dates or check back later. Match schedules
+            are updated regularly, and new fixtures may become available.
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-// src/features/tabs/FinishedMatches.jsx - WITH DATE SYNC AND FUTURE RESTRICTION
+// src/features/tabs/FinishedMatches.jsx - REDESIGNED WITH MODERN STYLING
 import React, { useState, useEffect } from "react";
 import { useFinishedMatches } from "../../hooks/useFinishedMatches";
 import { groupMatchesByCompetition } from "../../utils/matchSortingUtils";
@@ -6,7 +6,6 @@ import { groupMatchesByCompetition } from "../../utils/matchSortingUtils";
 // Components
 import FinishedMatchesHeader from "../../features/finished_matches/FinishedMatchesHeader";
 import MatchesGrid from "../../ui/MatchesGrid";
-import FinishedMatchesDebug from "../../features/finished_matches/FinishedMatchesDebug";
 import EmptyFinishedMatches from "../../features/finished_matches/EmptyFinishedMatches";
 import LoadingState from "../../ui/LoadingState";
 import ErrorState from "../../ui/ErrorState";
@@ -15,13 +14,19 @@ export default function FinishedMatches() {
   // UI state
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [groupByCompetition, setGroupByCompetition] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   // Filter states
   const [timeFilter, setTimeFilter] = useState("selected");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [resultFilter, setResultFilter] = useState("all");
 
-  // 🔄 SYNC: Kada se promijeni timeFilter, ažuriraj selectedDate
+  // Animation trigger
+  useEffect(() => {
+    setIsLoaded(true);
+  }, []);
+
+  // Date sync when timeFilter changes
   useEffect(() => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -35,13 +40,11 @@ export default function FinishedMatches() {
         setSelectedDate(yesterday);
         break;
       case "selected":
-        // Zadržava trenutni selectedDate
+        // Keep current selectedDate
         break;
-      // Za "week" i "all" ne mijenjamo selectedDate
     }
   }, [timeFilter]);
 
-  // 🚀 Use specialized hook with filters
   const {
     matches,
     allFinishedMatches,
@@ -53,7 +56,6 @@ export default function FinishedMatches() {
     favoritesCount,
     totalCount,
     refetch,
-    debugInfo,
   } = useFinishedMatches(selectedDate, {
     timeFilter,
     priorityFilter,
@@ -67,43 +69,75 @@ export default function FinishedMatches() {
       ? groupMatchesByCompetition(matches)
       : null;
 
-  // Handler za promjenu datuma (s validacijom)
+  // Date change handler with validation
   const handleDateChange = (newDate) => {
     const today = new Date();
     today.setHours(23, 59, 59, 999);
 
-    // Ne dopusti buduće datume
+    // Block future dates
     if (newDate > today) {
       return;
     }
 
     setSelectedDate(newDate);
-    // Kada ručno mijenjamo datum, prebaci na "selected" filter
     if (timeFilter !== "selected") {
       setTimeFilter("selected");
     }
   };
 
-  // 📍 Loading state
+  // Debug logging (replaces debug component)
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log("FinishedMatches Debug:", {
+        total: allFinishedMatches?.length || 0,
+        filtered: matches?.length || 0,
+        stats,
+        filters: { timeFilter, priorityFilter, resultFilter },
+        backgroundRefreshing,
+      });
+    }
+  }, [
+    allFinishedMatches,
+    matches,
+    stats,
+    timeFilter,
+    priorityFilter,
+    resultFilter,
+    backgroundRefreshing,
+  ]);
+
+  // Enhanced loading state
   if (loading) {
     return (
-      <div className="min-h-screen bg-muted rounded-3xl p-1">
-        <div className="flex justify-center my-4">
-          <div className="bg-green-600 text-white px-4 py-2 rounded-full text-sm font-medium">
-            ✅ Finished Matches
+      <div className="relative min-h-[600px]">
+        <div className="flex justify-center items-center min-h-[400px]">
+          <div className="text-center">
+            <div className="relative mb-6">
+              <div className="animate-spin w-16 h-16 border-4 border-green-500/30 border-t-green-500 rounded-full mx-auto"></div>
+              <div className="absolute inset-0 animate-ping w-16 h-16 border-4 border-green-500/20 rounded-full mx-auto opacity-20"></div>
+            </div>
+            <h3 className="text-2xl font-bold text-white mb-2">
+              Loading Finished Matches
+            </h3>
+            <p className="text-gray-300">Fetching completed match results...</p>
           </div>
         </div>
-        <LoadingState />
       </div>
     );
   }
 
-  // 📍 Error state
+  // Error state
   if (error) {
-    return <ErrorState error={error} onRetry={refetch} />;
+    return (
+      <ErrorState
+        title="Failed to load finished matches"
+        error={error}
+        onRetry={refetch}
+      />
+    );
   }
 
-  // 📍 No finished matches at all
+  // No finished matches at all
   if (!allFinishedMatches || allFinishedMatches.length === 0) {
     return (
       <EmptyFinishedMatches
@@ -113,16 +147,109 @@ export default function FinishedMatches() {
         priorityFilter={priorityFilter}
         resultFilter={resultFilter}
         onRefresh={refetch}
-        maxDateToday={true} // 🔒 Blokiraj budućnost
+        maxDateToday={true}
       />
     );
   }
 
-  // 📍 No matches after filtering
+  // No matches after filtering
   if (!matches || matches.length === 0) {
     return (
-      <div className="min-h-screen bg-muted rounded-3xl p-1">
+      <div className="relative">
         {/* Header with filters */}
+        <div
+          className={`transition-all duration-700 ${
+            isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+          }`}
+        >
+          <FinishedMatchesHeader
+            selectedDate={selectedDate}
+            setSelectedDate={handleDateChange}
+            stats={stats}
+            backgroundRefreshing={backgroundRefreshing}
+            timeFilter={timeFilter}
+            setTimeFilter={setTimeFilter}
+            priorityFilter={priorityFilter}
+            setPriorityFilter={setPriorityFilter}
+            resultFilter={resultFilter}
+            setResultFilter={setResultFilter}
+            groupByCompetition={groupByCompetition}
+            setGroupByCompetition={setGroupByCompetition}
+            topLeaguesCount={0}
+            favoritesCount={0}
+            totalCount={0}
+            maxDateToday={true}
+          />
+        </div>
+
+        {/* Empty state with clear filters option */}
+        <div
+          className={`text-center mt-16 px-6 transition-all duration-700 delay-300 ${
+            isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+          }`}
+        >
+          <div className="mb-6">
+            <div className="text-6xl mb-4">🔍</div>
+            <h3 className="text-3xl font-black text-white mb-2 bg-gradient-to-r from-green-400 via-white to-green-400 bg-clip-text text-transparent">
+              No matches found
+            </h3>
+            <p className="text-gray-300 mb-4">
+              {getEmptyMessage(timeFilter, priorityFilter, resultFilter)}
+            </p>
+            <p className="text-gray-400 text-sm mb-8">
+              Try adjusting your filters or selecting a different date
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row justify-center gap-4">
+            <button
+              onClick={() => {
+                setTimeFilter("selected");
+                setPriorityFilter("all");
+                setResultFilter("all");
+              }}
+              className="group relative overflow-hidden bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 text-white font-bold px-6 py-3 rounded-xl transition-all duration-300 hover:scale-105 shadow-lg hover:shadow-2xl hover:shadow-green-500/40"
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+              <span className="relative z-10 flex items-center gap-2">
+                🗑️ Clear Filters
+              </span>
+            </button>
+
+            <button
+              onClick={refetch}
+              disabled={backgroundRefreshing}
+              className={`group relative overflow-hidden font-bold px-6 py-3 rounded-xl transition-all duration-300 hover:scale-105 shadow-lg ${
+                backgroundRefreshing
+                  ? "bg-gradient-to-r from-gray-600/50 to-gray-700/50 text-gray-300 cursor-not-allowed"
+                  : "bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white hover:shadow-2xl hover:shadow-blue-500/40"
+              }`}
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+              <span className="relative z-10 flex items-center gap-2">
+                <span
+                  className={`${backgroundRefreshing ? "animate-spin" : ""}`}
+                >
+                  🔄
+                </span>
+                {backgroundRefreshing ? "Refreshing..." : "Refresh"}
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Main render with matches
+  return (
+    <div className="relative">
+      {/* Header */}
+      <div
+        className={`transition-all duration-700 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+        }`}
+      >
         <FinishedMatchesHeader
           selectedDate={selectedDate}
           setSelectedDate={handleDateChange}
@@ -136,125 +263,55 @@ export default function FinishedMatches() {
           setResultFilter={setResultFilter}
           groupByCompetition={groupByCompetition}
           setGroupByCompetition={setGroupByCompetition}
-          topLeaguesCount={0}
-          favoritesCount={0}
-          totalCount={0}
-          maxDateToday={true} // 🔒 Blokiraj budućnost
-        />
-
-        {/* Empty state with clear filters option */}
-        <div className="text-center mt-12">
-          <div className="text-6xl mb-4">🔍</div>
-          <p className="text-foreground font-black text-2xl mb-2">
-            No matches found
-          </p>
-          <p className="text-muted-foreground mb-4">
-            {getEmptyMessage(timeFilter, priorityFilter, resultFilter)}
-          </p>
-          <p className="text-muted-foreground text-sm mb-6">
-            Try adjusting your filters or selecting a different date
-          </p>
-
-          <div className="flex justify-center gap-3">
-            <button
-              onClick={() => {
-                setTimeFilter("selected");
-                setPriorityFilter("all");
-                setResultFilter("all");
-              }}
-              className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors"
-            >
-              🗑️ Clear Filters
-            </button>
-
-            <button
-              onClick={refetch}
-              disabled={backgroundRefreshing}
-              className={`px-6 py-2 rounded-lg font-medium transition-colors ${
-                backgroundRefreshing
-                  ? "bg-gray-600 text-gray-300 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              {backgroundRefreshing ? "🔄 Refreshing..." : "🔄 Refresh"}
-            </button>
-          </div>
-        </div>
-
-        {/* Debug info */}
-        <FinishedMatchesDebug
-          allMatches={allFinishedMatches}
-          finishedMatches={allFinishedMatches}
-          filteredMatches={matches}
-          sortedMatches={matches}
-          stats={stats}
-          backgroundRefreshing={backgroundRefreshing}
+          topLeaguesCount={topLeaguesCount}
+          favoritesCount={favoritesCount}
+          totalCount={totalCount}
+          maxDateToday={true}
         />
       </div>
-    );
-  }
 
-  // 📍 Main render with matches
-  return (
-    <div className="min-h-screen bg-muted rounded-3xl p-1">
-      {/* Header with date picker and filter dropdowns */}
-      <FinishedMatchesHeader
-        selectedDate={selectedDate}
-        setSelectedDate={handleDateChange}
-        stats={stats}
-        backgroundRefreshing={backgroundRefreshing}
-        timeFilter={timeFilter}
-        setTimeFilter={setTimeFilter}
-        priorityFilter={priorityFilter}
-        setPriorityFilter={setPriorityFilter}
-        resultFilter={resultFilter}
-        setResultFilter={setResultFilter}
-        groupByCompetition={groupByCompetition}
-        setGroupByCompetition={setGroupByCompetition}
-        topLeaguesCount={topLeaguesCount}
-        favoritesCount={favoritesCount}
-        totalCount={totalCount}
-        maxDateToday={true} // 🔒 Blokiraj budućnost
-      />
+      {/* Matches Grid */}
+      <div
+        className={`transition-all duration-700 delay-300 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+        }`}
+      >
+        <MatchesGrid
+          groupByCompetition={groupByCompetition}
+          groupedMatches={groupedMatches}
+          sortedMatches={matches}
+          showLiveIndicator={false}
+        />
+      </div>
 
-      {/* Matches grid */}
-      <MatchesGrid
-        groupByCompetition={groupByCompetition}
-        groupedMatches={groupedMatches}
-        sortedMatches={matches}
-        showLiveIndicator={false}
-      />
-
-      {/* Manual refresh button */}
-      <div className="flex justify-center mt-8 mb-4">
+      {/* Enhanced Manual refresh button */}
+      <div
+        className={`flex justify-center mt-8 mb-4 transition-all duration-700 delay-500 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+        }`}
+      >
         <button
           onClick={refetch}
           disabled={backgroundRefreshing}
-          className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 flex items-center gap-2 ${
+          className={`group relative overflow-hidden font-bold px-8 py-4 rounded-xl transition-all duration-300 hover:scale-105 shadow-lg flex items-center gap-2 ${
             backgroundRefreshing
-              ? "bg-gray-600 text-gray-300 cursor-not-allowed"
-              : "bg-green-600 text-white hover:bg-green-700 hover:scale-105 active:scale-95"
+              ? "bg-gradient-to-r from-gray-600/50 to-gray-700/50 text-gray-300 cursor-not-allowed"
+              : "bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 text-white hover:shadow-2xl hover:shadow-green-500/40"
           }`}
         >
-          <span className={`${backgroundRefreshing ? "animate-spin" : ""}`}>
+          <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          <span
+            className={`relative z-10 ${
+              backgroundRefreshing ? "animate-spin" : ""
+            }`}
+          >
             🔄
           </span>
-          {backgroundRefreshing ? "Refreshing..." : "Manual Refresh"}
+          <span className="relative z-10">
+            {backgroundRefreshing ? "Refreshing..." : "Manual Refresh"}
+          </span>
         </button>
       </div>
-
-      {/* Debug info (dev only) */}
-      {debugInfo && (
-        <FinishedMatchesDebug
-          allMatches={allFinishedMatches}
-          finishedMatches={allFinishedMatches}
-          filteredMatches={matches}
-          sortedMatches={matches}
-          stats={stats}
-          backgroundRefreshing={backgroundRefreshing}
-          debugInfo={debugInfo}
-        />
-      )}
     </div>
   );
 }

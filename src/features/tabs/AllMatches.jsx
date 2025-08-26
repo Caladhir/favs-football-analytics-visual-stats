@@ -1,5 +1,5 @@
-// src/features/tabs/AllMatches.jsx - AŽURIRANO S NOVIM BUTTON KOMPONENTAMA
-import React, { useState, useMemo } from "react";
+// src/features/tabs/AllMatches.jsx - REDESIGNED WITH MODERN STYLING
+import React, { useState, useMemo, useEffect } from "react";
 import { useAutoRefresh } from "../../hooks/useAutoRefresh";
 import { useAllMatches } from "../../hooks/useAllMatches";
 
@@ -23,17 +23,12 @@ import EmptyAllMatches from "../../features/all_matches/EmptyAllMatches";
 import LoadingState from "../../ui/LoadingState";
 import ErrorState from "../../ui/ErrorState";
 
-// Import novih button komponenti
+// Import button components
 import TimeSortButton, { applyTimeSort } from "../../ui/TimeSortButton";
 import GroupButton from "../../ui/GroupButton";
-import { RefreshButton, PillButton } from "../../ui/SpecializedButtons";
+import { RefreshButton } from "../../ui/SpecializedButtons";
 
-/* ---------------------------------------------
-   DEDUPE: spajaj duplikate (live + scheduled)
-   ključ = (home, away, start_time[min], competition)
-   preferiraj: bolji status > noviji updated_at > source=sofascore
---------------------------------------------- */
-
+/* Dedupe logic */
 const STATUS_RANK = {
   live: 4,
   inprogress: 4,
@@ -62,7 +57,7 @@ function rankStatus(s) {
 function minuteKey(iso) {
   const t = new Date(iso);
   if (!Number.isFinite(t.getTime())) return "0";
-  return String(Math.round(t.getTime() / 60000)); // round to minute
+  return String(Math.round(t.getTime() / 60000));
 }
 
 function safeLower(s) {
@@ -79,25 +74,21 @@ function makeKey(m) {
 }
 
 function chooseBetter(a, b) {
-  // 1) bolji status
   const rsA = rankStatus(a.status || a.status_type);
   const rsB = rankStatus(b.status || b.status_type);
   if (rsB > rsA) return b;
   if (rsA > rsB) return a;
 
-  // 2) noviji updated_at
   const ua = new Date(a.updated_at || a.last_seen_at || 0).getTime();
   const ub = new Date(b.updated_at || b.last_seen_at || 0).getTime();
   if (ub > ua) return b;
   if (ua > ub) return a;
 
-  // 3) preferiraj sofascore
   const sa = (a.source || "").toLowerCase();
   const sb = (b.source || "").toLowerCase();
   if (sb === "sofascore" && sa !== "sofascore") return b;
   if (sa === "sofascore" && sb !== "sofascore") return a;
 
-  // 4) fallback: ostavi a
   return a;
 }
 
@@ -123,8 +114,6 @@ function dedupeByTeamsTime(list = []) {
   return deduped;
 }
 
-/* --------------------------------------------- */
-
 export default function AllMatches() {
   const [selectedDate, setSelectedDate] = useState(() => {
     const d = new Date();
@@ -133,11 +122,17 @@ export default function AllMatches() {
   });
 
   const [groupByCompetition, setGroupByCompetition] = useState(false);
-  const [timeSortType, setTimeSortType] = useState("smart"); // "smart" | "chronological" | "reverse-chronological"
+  const [timeSortType, setTimeSortType] = useState("smart");
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const userPreferences = useUserPreferences();
   const { matches, loading, backgroundRefreshing, handleAutoRefresh, error } =
     useAllMatches(selectedDate);
+
+  // Animation trigger
+  useEffect(() => {
+    setIsLoaded(true);
+  }, []);
 
   // 1) DEDUPE
   const dedupedMatches = useMemo(
@@ -166,7 +161,7 @@ export default function AllMatches() {
     return groupMatchesByCompetition(sortedMatches);
   }, [sortedMatches, groupByCompetition]);
 
-  // 4) Stats (nakon dedupe + sort)
+  // 4) Stats
   const stats = useMemo(() => {
     if (!sortedMatches.length) return null;
 
@@ -213,23 +208,37 @@ export default function AllMatches() {
     };
   }, [sortedMatches, userPreferences]);
 
-  // Auto-refresh kad ima live utakmica
+  // Auto-refresh
   useAutoRefresh(dedupedMatches, handleAutoRefresh, 30000);
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-muted rounded-3xl p-1">
-        <div className="flex justify-center my-4">
-          <div className="bg-red-600 text-white px-4 py-2 rounded-full text-sm font-medium">
-            📅 All Matches
+      <div className="relative min-h-[600px]">
+        <div className="flex justify-center items-center min-h-[400px]">
+          <div className="text-center">
+            <div className="relative mb-6">
+              <div className="animate-spin w-16 h-16 border-4 border-red-500/30 border-t-red-500 rounded-full mx-auto"></div>
+              <div className="absolute inset-0 animate-ping w-16 h-16 border-4 border-red-500/20 rounded-full mx-auto opacity-20"></div>
+            </div>
+            <h3 className="text-2xl font-bold text-white mb-2">
+              Loading All Matches
+            </h3>
+            <p className="text-gray-300">Fetching latest match data...</p>
           </div>
         </div>
-        <LoadingState />
       </div>
     );
   }
 
-  if (error) return <ErrorState error={error} onRetry={handleAutoRefresh} />;
+  if (error) {
+    return (
+      <ErrorState
+        title="Failed to load matches"
+        error={error}
+        onRetry={handleAutoRefresh}
+      />
+    );
+  }
 
   if (!dedupedMatches.length) {
     return (
@@ -242,69 +251,63 @@ export default function AllMatches() {
   }
 
   return (
-    <div className="min-h-screen bg-muted rounded-3xl p-1">
-      <AllMatchesHeader
-        selectedDate={selectedDate}
-        setSelectedDate={setSelectedDate}
-      />
+    <div className="relative">
+      {/* Header */}
+      <div
+        className={`transition-all duration-700 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+        }`}
+      >
+        <AllMatchesHeader
+          selectedDate={selectedDate}
+          setSelectedDate={setSelectedDate}
+          matchCount={sortedMatches.length}
+          backgroundRefreshing={backgroundRefreshing}
+          stats={stats}
+        />
+      </div>
 
-      {/* Controls row - AŽURIRANO S NOVIM BUTTON KOMPONENTAMA */}
-      <div className="text-center mb-4 space-y-3">
-        {stats && (
-          <div className="flex justify-center items-center gap-3 flex-wrap text-xs">
-            {/* Status Pills - koristi PillButton */}
-            {stats.live > 0 && (
-              <PillButton active className="bg-red-600">
-                🔴 {stats.live} Live
-              </PillButton>
-            )}
-            {stats.upcoming > 0 && (
-              <PillButton active className="bg-blue-600">
-                ⏰ {stats.upcoming} Upcoming
-              </PillButton>
-            )}
-            {stats.finished > 0 && (
-              <PillButton active className="bg-green-600">
-                ✅ {stats.finished} Finished
-              </PillButton>
-            )}
-            {stats.topLeagues > 0 && (
-              <PillButton active className="bg-yellow-600">
-                ⭐ {stats.topLeagues} Top
-              </PillButton>
-            )}
-            {stats.favorites > 0 && (
-              <PillButton active className="bg-purple-600">
-                ❤️ {stats.favorites} Favorites
-              </PillButton>
-            )}
-          </div>
-        )}
-
-        {/* Controls Row */}
+      {/* Enhanced Controls */}
+      <div
+        className={`text-center mb-6 transition-all duration-700 delay-300 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+        }`}
+      >
         <div className="flex justify-center items-center gap-4">
-          {/* Group toggle - koristi GroupButton */}
-          <GroupButton
-            isGrouped={groupByCompetition}
-            onToggle={() => setGroupByCompetition((v) => !v)}
-            size="sm"
-            variant="minimal"
-            groupedText="📋 Grouped"
-            ungroupedText="📝 Group"
-          />
+          {/* Group toggle */}
+          <div className="relative">
+            <GroupButton
+              isGrouped={groupByCompetition}
+              onToggle={() => setGroupByCompetition((v) => !v)}
+              size="sm"
+              variant="modern"
+              className="bg-gradient-to-r from-gray-700/80 to-gray-800/80 backdrop-blur-sm border-gray-600/30 hover:from-red-600/80 hover:to-red-700/80 hover:border-red-500/40"
+            />
+          </div>
 
-          {/* Time sort - već koristi TimeSortButton */}
-          <TimeSortButton
-            value={timeSortType}
-            onChange={setTimeSortType}
-            size="sm"
-            variant="minimal"
-          />
+          {/* Time sort */}
+          <div className="relative">
+            <TimeSortButton
+              value={timeSortType}
+              onChange={setTimeSortType}
+              size="sm"
+              variant="modern"
+              className="rounded-full bg-gradient-to-r from-gray-700/80 to-gray-800/80 backdrop-blur-sm border-gray-600/30 hover:from-blue-600/80 hover:to-blue-700/80 hover:border-blue-500/40"
+            />
+          </div>
+
+          {/* Background refresh indicator */}
+          {backgroundRefreshing && (
+            <div className="bg-gradient-to-r from-blue-600/80 to-blue-700/80 backdrop-blur-sm text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-lg border border-blue-500/30 flex items-center gap-2">
+              <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
+              Refreshing...
+            </div>
+          )}
         </div>
 
         {/* Sort indicator */}
         {timeSortType !== "smart" && (
-          <div className="text-xs text-muted-foreground">
+          <div className="text-sm text-gray-400 mt-3">
             Sorted by:{" "}
             {timeSortType === "chronological"
               ? "Earliest first"
@@ -313,21 +316,39 @@ export default function AllMatches() {
         )}
       </div>
 
-      <MatchesGrid
-        groupByCompetition={groupByCompetition}
-        groupedMatches={groupedMatches}
-        sortedMatches={sortedMatches}
-        showLiveIndicator={true}
-      />
+      {/* Matches Grid */}
+      <div
+        className={`transition-all duration-700 delay-500 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+        }`}
+      >
+        <MatchesGrid
+          groupByCompetition={groupByCompetition}
+          groupedMatches={groupedMatches}
+          sortedMatches={sortedMatches}
+          showLiveIndicator={true}
+        />
+      </div>
 
-      {/* Refresh controls - AŽURIRANO */}
-      <div className="flex justify-center items-center gap-3 mt-8 mb-4">
+      {/* Enhanced Refresh Controls */}
+      <div
+        className={`flex justify-center items-center gap-4 mt-8 mb-4 transition-all duration-700 delay-600 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+        }`}
+      >
         <RefreshButton
           isLoading={backgroundRefreshing}
           onClick={handleAutoRefresh}
           size="lg"
+          className="group relative overflow-hidden bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold px-8 py-4 rounded-xl shadow-lg hover:shadow-2xl hover:shadow-red-500/40 transition-all duration-300 hover:scale-105"
         >
-          {backgroundRefreshing ? "Refreshing..." : "Manual Refresh"}
+          <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          <span className="relative z-10 flex items-center gap-2">
+            <span className={`${backgroundRefreshing ? "animate-spin" : ""}`}>
+              🔄
+            </span>
+            {backgroundRefreshing ? "Refreshing..." : "Manual Refresh"}
+          </span>
         </RefreshButton>
 
         {/* Quick time-sort cycle (mobile) */}
@@ -341,24 +362,34 @@ export default function AllMatches() {
                 : "smart";
             setTimeSortType(next);
           }}
-          className="md:hidden px-4 py-2 bg-gray-800/80 text-white rounded-lg border border-gray-600 hover:bg-gray-700/80 transition-colors"
+          className="md:hidden group relative overflow-hidden bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-600 hover:to-gray-700 text-white px-4 py-2 rounded-xl border border-gray-600 hover:border-gray-500 transition-all duration-300 hover:scale-105 shadow-lg"
           title="Cycle sort type"
         >
-          {timeSortType === "smart"
-            ? "🤖"
-            : timeSortType === "chronological"
-            ? "⏰↑"
-            : "⏰↓"}
+          <div className="absolute inset-0 bg-gradient-to-r from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          <span className="relative z-10">
+            {timeSortType === "smart"
+              ? "🤖"
+              : timeSortType === "chronological"
+              ? "⏰→"
+              : "⏰←"}
+          </span>
         </button>
       </div>
 
-      <AllMatchesDebug
-        matches={matches}
-        sortedMatches={sortedMatches}
-        userPreferences={userPreferences}
-        backgroundRefreshing={backgroundRefreshing}
-        stats={stats}
-      />
+      {/* Debug info */}
+      <div
+        className={`transition-all duration-700 delay-700 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+        }`}
+      >
+        <AllMatchesDebug
+          matches={matches}
+          sortedMatches={sortedMatches}
+          userPreferences={userPreferences}
+          backgroundRefreshing={backgroundRefreshing}
+          stats={stats}
+        />
+      </div>
     </div>
   );
 }

@@ -2,18 +2,83 @@ from __future__ import annotations
 from typing import Any, Dict
 import os
 import time
-import requests
+# requests is optional; if not installed per-player direct stats will silently skip
+try:  # type: ignore
+    import requests  # type: ignore  # noqa: F401
+except Exception:  # pragma: no cover
+    requests = None  # type: ignore
 from datetime import datetime, timezone
 from utils.logger import get_logger
+from core.config import SOFA_TOURNAMENTS_ALLOW
+try:  # optional fallback name-based tracking helper
+    from utils.leagues_filter import should_track_competition  # type: ignore
+except Exception:  # pragma: no cover
+    def should_track_competition(_: dict) -> bool:  # type: ignore
+        return False
 
 logger = get_logger(__name__)
 
 # Single-event enrichment split out of legacy script.
 
-def enrich_event(browser: Any, event: Dict[str, Any], throttle: float = 0.0) -> Dict[str, Any]:
+def enrich_event(browser: Any, event: Dict[str, Any], throttle: float = 0.0, *, heavy: bool = True) -> Dict[str, Any]:
+    """Enrich a single SofaScore event.
+
+    heavy=False mode intentionally skips high-volume / late-availability endpoints
+    (lineups, per-player stats, incidents, statistics, shotmap, avg positions)
+    to reduce network churn for far-future scheduled matches. Caller (e.g. live
+    fetch loop) can re-run later with heavy=True when within a prefetch window
+    or once status becomes live / finished.
+    """
     eid = event.get("id")
+    # Allow-list gating (uniqueTournament id) – skip early if not allowed
+    try:
+        utid = (event.get("tournament") or {}).get("uniqueTournament") or {}
+        utid_val = utid.get("id") if isinstance(utid, dict) else None
+        if SOFA_TOURNAMENTS_ALLOW:
+            # Primary gating by explicit ID allow-list
+            if utid_val not in SOFA_TOURNAMENTS_ALLOW:
+                # Fallback: allow if competition still matches name-based priority rules
+                comp = (event.get("tournament") or {}).get("uniqueTournament") or {}
+                if not should_track_competition(comp):
+                    return {"event": event, "event_id": eid, "_skip": "not_in_allowlist"}
+        else:
+            # No explicit ID list -> use name-based decision alone
+            comp = (event.get("tournament") or {}).get("uniqueTournament") or {}
+            if comp and not should_track_competition(comp):
+                return {"event": event, "event_id": eid, "_skip": "not_in_priority_names"}
+    except Exception:
+        pass
     enriched: Dict[str, Any] = {"event": event, "event_id": eid}
     if not eid:
+        return enriched
+    # Status-based gating: only heavy for live or finished (or if caller forced heavy=True explicitly)
+    status_type = None
+    try:
+        st_obj = event.get("status") or {}
+        status_type = st_obj.get("type") if isinstance(st_obj, dict) else None
+    except Exception:
+        status_type = None
+    live_like = str(status_type).lower() in {"inprogress","live","in_progress"}
+    finished_like = str(status_type).lower() in {"finished","after overtime","after penalties","ft"}
+    if heavy and not (live_like or finished_like):
+        # Downgrade to light automatically for scheduled/future events
+        heavy = False
+
+    if not heavy:
+        # Minimal venue backfill attempt (cheap) only
+        try:
+            ev_obj = enriched.get("event") or {}
+            v = ev_obj.get("venue") if isinstance(ev_obj, dict) else None
+            if not isinstance(v, dict) or not (v.get("name") or ((v.get("stadium") or {}).get("name"))):
+                detail = browser.fetch_data(f"event/{eid}") or {}
+                detail_event = detail.get("event") if isinstance(detail, dict) and isinstance(detail.get("event"), dict) else detail
+                if isinstance(detail_event, dict):
+                    dv = detail_event.get("venue")
+                    if isinstance(dv, dict):
+                        ev_obj["venue"] = dv
+                        enriched["event"] = ev_obj
+        except Exception:
+            pass
         return enriched
     def _fetch(path, key=None, default=None):
         try:
@@ -100,9 +165,11 @@ def enrich_event(browser: Any, event: Dict[str, Any], throttle: float = 0.0) -> 
             def _direct_player_stats(ev_id: int, player_id: int) -> Dict[str, Any]:
                 url = f"https://www.sofascore.com/api/v1/event/{ev_id}/player/{player_id}/statistics"
                 try:
-                    r = requests.get(url, headers=HEADERS, timeout=15)
-                    r.raise_for_status()
-                    js = r.json() if r.text else {}
+                    if requests is None:
+                        return {}
+                    r = requests.get(url, headers=HEADERS, timeout=15)  # type: ignore
+                    r.raise_for_status()  # type: ignore
+                    js = r.json() if r.text else {}  # type: ignore
                     if isinstance(js, dict):
                         return js.get("statistics") or {}
                 except Exception as ex:
@@ -110,34 +177,107 @@ def enrich_event(browser: Any, event: Dict[str, Any], throttle: float = 0.0) -> 
                 return {}
             # Env flag to allow toggling direct fetch (default on). Set PLAYER_STATS_DIRECT=0 to disable.
             use_direct = os.getenv("PLAYER_STATS_DIRECT", "1") not in {"0", "false", "False"}
+            # Pre-filter: identify clear bench unused to skip direct fetch (saves time & reduces warnings)
+            def _is_unused_bench(entry: dict) -> bool:
+                try:
+                    # Heuristics: marked substitute and no minutes / no subbedInTime
+                    if entry.get("isSubstitute") or entry.get("substitute"):
+                        stats_obj = entry.get("statistics") or {}
+                        mp = stats_obj.get("minutesPlayed") or entry.get("minutesPlayed")
+                        if (mp in (None, 0)) and not entry.get("subbedInTime") and not entry.get("subbedIn"):
+                            return True
+                    return False
+                except Exception:
+                    return False
+            bench_skipped: list[int] = []
+            # Configure concurrency
+            import concurrent.futures
+            worker_count = 1
+            try:
+                worker_count = int(os.getenv("PLAYER_STATS_WORKERS", "8"))
+            except Exception:
+                worker_count = 8
+            selected_pids = []
             for pid in pid_set:
-                if use_direct:
-                    stats_block = _direct_player_stats(eid, pid)
+                # locate entry to decide if we skip
+                entry_ref = None
+                for side_block in (home, away):
+                    for pl in (side_block.get("players") or []):
+                        if (pl.get("player") or {}).get("id") == pid:
+                            entry_ref = pl
+                            break
+                    if entry_ref:
+                        break
+                if entry_ref and _is_unused_bench(entry_ref):
+                    bench_skipped.append(pid)
                 else:
-                    detail = _fetch(f"event/{eid}/player/{pid}/statistics", {}) or {}
-                    stats_block = detail.get("statistics") if isinstance(detail, dict) else None
-                if isinstance(stats_block, dict) and stats_block:
-                    merged = False
-                    for side_block in (home, away):
-                        for pl in (side_block.get("players") or []):
-                            if (pl.get("player") or {}).get("id") == pid:
-                                _merge_stats(pl, stats_block)
-                                merged = True
-                                mp = stats_block.get("minutesPlayed")
-                                logger.debug(f"[enrich_player_stat] ev={eid} pid={pid} direct={use_direct} minutes_played={mp} fetch_keys={list(stats_block.keys())}")
+                    selected_pids.append(pid)
+            def _fetch_one(pid: int):
+                if use_direct:
+                    return pid, _direct_player_stats(eid, pid)
+                detail = _fetch(f"event/{eid}/player/{pid}/statistics", {}) or {}
+                return pid, (detail.get("statistics") if isinstance(detail, dict) else None)
+            if worker_count > 1 and selected_pids:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as ex:
+                    for future in concurrent.futures.as_completed([ex.submit(_fetch_one, pid) for pid in selected_pids]):
+                        try:
+                            pid, stats_block = future.result()
+                        except Exception:
+                            pid, stats_block = None, None
+                        if not pid:
+                            continue
+                        if isinstance(stats_block, dict) and stats_block:
+                            merged = False
+                            for side_block in (home, away):
+                                for pl in (side_block.get("players") or []):
+                                    if (pl.get("player") or {}).get("id") == pid:
+                                        _merge_stats(pl, stats_block)
+                                        merged = True
+                                        mp = stats_block.get("minutesPlayed")
+                                        logger.debug(f"[enrich_player_stat] ev={eid} pid={pid} direct={use_direct} minutes_played={mp} fetch_keys={list(stats_block.keys())}")
+                                        break
+                                if merged:
+                                    break
+                            if merged:
+                                success_pids.add(pid)
+                            else:
+                                failed_pids.append(pid)
+                        else:
+                            failed_pids.append(pid)
+            else:
+                for pid in selected_pids:
+                    if use_direct:
+                        stats_block = _direct_player_stats(eid, pid)
+                    else:
+                        detail = _fetch(f"event/{eid}/player/{pid}/statistics", {}) or {}
+                        stats_block = detail.get("statistics") if isinstance(detail, dict) else None
+                    if isinstance(stats_block, dict) and stats_block:
+                        merged = False
+                        for side_block in (home, away):
+                            for pl in (side_block.get("players") or []):
+                                if (pl.get("player") or {}).get("id") == pid:
+                                    _merge_stats(pl, stats_block)
+                                    merged = True
+                                    mp = stats_block.get("minutesPlayed")
+                                    logger.debug(f"[enrich_player_stat] ev={eid} pid={pid} direct={use_direct} minutes_played={mp} fetch_keys={list(stats_block.keys())}")
+                                    break
+                            if merged:
                                 break
                         if merged:
-                            break
-                    if merged:
-                        success_pids.add(pid)
+                            success_pids.add(pid)
+                        else:
+                            failed_pids.append(pid)
                     else:
                         failed_pids.append(pid)
-                else:
-                    failed_pids.append(pid)
-                if throttle > 0:
-                    time.sleep(throttle)
-            if failed_pids:
-                logger.warning(f"[enrich_player_stat_missing] ev={eid} missing_count={len(failed_pids)} pids={failed_pids[:10]}...")
+                    if throttle > 0:
+                        time.sleep(throttle)
+            if failed_pids or bench_skipped:
+                msg_parts = [f"ev={eid}"]
+                if failed_pids:
+                    msg_parts.append(f"missing_active={len(failed_pids)} pids={failed_pids[:10]}...")
+                if bench_skipped:
+                    msg_parts.append(f"bench_skipped={len(bench_skipped)}")
+                logger.warning("[enrich_player_stat_missing] " + " ".join(msg_parts))
             # Extra debug: list any player whose merged minutes look suspicious (>120)
             try:
                 for side_lbl, side_block in (("home", home), ("away", away)):

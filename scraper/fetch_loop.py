@@ -5,6 +5,8 @@ import asyncio
 import os
 import sys
 import time
+import json
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -17,6 +19,22 @@ from core.database import db
 from core.browser import Browser
 from utils.logger import get_logger
 from processors import MatchProcessor, stats_processor
+from pipeline.enrichers import enrich_event  # unify enrichment with historical pipeline
+from pipeline.standings import build_standings  # reuse same standings builder as historical ingest
+
+"""Modernized live fetch loop.
+
+Key changes vs. earlier version:
+ 1. Single-source enrichment: uses pipeline.enrichers.enrich_event (same as init_match_dataset)
+ 2. Event categorisation (live / scheduled / finished) with minimal state to avoid reprocessing
+ 3. Skips re-enriching fully finished events once stored (configurable window)
+ 4. Added shots & average positions automatically via enrich_event (previous loop missed them)
+
+Env / tuning knobs (optional):
+    LIVE_ONLY=1              → only process live events
+    FINISHED_GRACE_MIN=10    → how many minutes after finish we still re-check (default 5)
+    SCHEDULE_LOOKAHEAD_MIN=180 → scheduled events starting within this many minutes are monitored (default 180)
+"""
 
 logger = get_logger(__name__)
 
@@ -27,8 +45,51 @@ class FetchLoop:
     """
 
     def __init__(self, max_events: int = 50):
-        self.max_events = max_events
+        # Allow override via env (so you can raise without code change)
+        self.max_events = int(os.getenv("MAX_EVENTS", str(max_events)))
         self.browser: Optional[Browser] = None
+        # State to avoid repeated heavy work on finished matches
+        self._finished_processed: set[int] = set()
+        self._last_status: dict[int, str] = {}
+        # Configurable behaviour via env
+        self.live_only = os.getenv("LIVE_ONLY", "0") in {"1", "true", "True"}
+        self.finished_grace_min = int(os.getenv("FINISHED_GRACE_MIN", "5"))  # keep refreshing N minutes after finish
+        self.schedule_lookahead_min = int(os.getenv("SCHEDULE_LOOKAHEAD_MIN", "180"))
+        # Track when event finished to apply grace
+        self._finished_timestamp: dict[int, float] = {}
+        # Classification mapping for current cycle (eid -> live|scheduled|finished)
+        self._cycle_classification: Dict[int, str] = {}
+        # Persistence of finished events across restarts
+        state_dir = Path(os.getenv("SCRAPER_STATE_DIR", Path(__file__).resolve().parents[1] / "state"))
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        self._state_file = state_dir / "finished_events.json"
+        self._load_finished_state()
+        # Live snapshot (all live events minimal) for UI quick display
+        self._live_snapshot = []  # type: ignore[list]
+        self._live_snapshot_file = Path(os.getenv("LIVE_SNAPSHOT_PATH", Path(__file__).resolve().parents[1] / "state" / "live_snapshot.json"))
+        self._last_live_count = 0
+
+    # ------- state persistence -------
+    def _load_finished_state(self):  # best-effort
+        try:
+            if self._state_file.exists():
+                data = json.loads(self._state_file.read_text())
+                if isinstance(data, dict):
+                    fins = data.get("finished")
+                    if isinstance(fins, list):
+                        self._finished_processed = {int(x) for x in fins if isinstance(x, (int, str)) and str(x).isdigit()}
+        except Exception:
+            pass
+
+    def _save_finished_state(self):  # best-effort
+        try:
+            payload = {"finished": sorted(self._finished_processed)}
+            self._state_file.write_text(json.dumps(payload))
+        except Exception:
+            pass
 
     async def run_cycle(self) -> Dict[str, Any]:
         start = time.time()
@@ -58,9 +119,17 @@ class FetchLoop:
                 self.browser = None
 
     async def _fetch_phase(self) -> List[Dict[str, Any]]:
+        """Fetch event shells (no per-event enrichment yet).
+
+        Strategy:
+          * Always fetch live events (events/live)
+          * Fetch today's scheduled events; keep only ones starting within schedule_lookahead_min
+          * Optionally skip scheduled/past if LIVE_ONLY set
+          * Avoid reprocessing long-finished events beyond grace window
+        """
         logger.info("📡 Phase 1: Fetching raw events...")
-        self.browser = Browser()
-        out: List[Dict[str, Any]] = []
+        if not self.browser:
+            self.browser = Browser()
 
         def _take_events(payload):
             if not payload:
@@ -70,67 +139,168 @@ class FetchLoop:
             if isinstance(payload, list):
                 return payload
             return []
-
+        out: dict[int, Dict[str, Any]] = {}
+        self._cycle_classification = {}
+        now_ts = time.time()
         try:
             live_data = self._safe_fetch("events/live")
-            out += _take_events(live_data)
+            # Diagnostics for live fetch
+            if isinstance(live_data, dict) and live_data.get("__error__"):
+                logger.warning(f"[diag][live_fetch_error] code={live_data.get('__error__')} msg={live_data.get('__msg__')}")
+            raw_live_events = 0
+            if isinstance(live_data, dict) and isinstance(live_data.get("events"), list):
+                raw_live_events = len(live_data.get("events"))
+            elif isinstance(live_data, list):
+                raw_live_events = len(live_data)
+            # Build full live snapshot BEFORE limiting for heavy processing
+            full_live_events = _take_events(live_data)
+            live_snapshot: List[Dict[str, Any]] = []
+            for ev in full_live_events:
+                if not isinstance(ev, dict):
+                    continue
+                eid = ev.get("id")
+                if eid is None:
+                    continue
+                # Add to working set (subject to later max_events trimming)
+                if eid not in out:
+                    out[eid] = ev
+                    self._cycle_classification[eid] = "live"
+                # Minimal snapshot row
+                try:
+                    home = (ev.get("homeTeam") or {})
+                    away = (ev.get("awayTeam") or {})
+                    status_obj = ev.get("status") or {}
+                    minute = None
+                    if isinstance(status_obj, dict):
+                        minute = status_obj.get("minute") or (status_obj.get("description") if isinstance(status_obj.get("description"), int) else None)
+                    live_snapshot.append({
+                        "id": eid,
+                        "tournamentId": (ev.get("tournament") or {}).get("id"),
+                        "categoryId": ((ev.get("tournament") or {}).get("category") or {}).get("id"),
+                        "home": {"id": home.get("id"), "name": home.get("name"), "score": (ev.get("homeScore") or {}).get("current")},
+                        "away": {"id": away.get("id"), "name": away.get("name"), "score": (ev.get("awayScore") or {}).get("current")},
+                        "status": {
+                            "type": status_obj.get("type") if isinstance(status_obj, dict) else status_obj,
+                            "description": status_obj.get("description") if isinstance(status_obj, dict) else None,
+                            "minute": minute,
+                        },
+                        "startTimestamp": ev.get("startTimestamp"),
+                    })
+                except Exception:
+                    pass
+            # Persist snapshot (all live events) even if we later limit heavy work
+            try:
+                if live_snapshot:
+                    self._live_snapshot = live_snapshot
+                    self._last_live_count = len(live_snapshot)
+                    self._live_snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+                    self._live_snapshot_file.write_text(json.dumps({
+                        "generatedAt": int(time.time()),
+                        "count": len(live_snapshot),
+                        "events": live_snapshot
+                    }), encoding="utf-8")
+                    logger.info(f"[live_snapshot] total_live={len(live_snapshot)} saved='{self._live_snapshot_file.name}' (heavy_processing_cap={self.max_events})")
+                else:
+                    logger.info("[live_snapshot] no live events")
+            except Exception as ex:
+                logger.warning(f"[live_snapshot][write_fail] err={ex}")
+            if raw_live_events and raw_live_events != sum(1 for _, cls in self._cycle_classification.items() if cls == "live"):
+                logger.info(f"[diag][live_count_mismatch] raw_list={raw_live_events} distinct_ids={sum(1 for _, cls in self._cycle_classification.items() if cls=='live')} duplicates={raw_live_events - sum(1 for _, cls in self._cycle_classification.items() if cls=='live')}")
 
-            today = datetime.now(timezone.utc).date().isoformat()
-            sched = self._safe_fetch(f"scheduled-events/{today}")
-            out += _take_events(sched)
+            if not self.live_only:
+                today = datetime.now(timezone.utc).date().isoformat()
+                sched = self._safe_fetch(f"scheduled-events/{today}")
+                for ev in _take_events(sched):
+                    if not isinstance(ev, dict):
+                        continue
+                    eid = ev.get("id")
+                    if eid is None:
+                        continue
+                    # Keep only if starts soon enough
+                    starts = ev.get("startTimestamp") or ev.get("startTime")
+                    if starts:
+                        try:
+                            if isinstance(starts, (int, float)):
+                                mins_to_kick = (starts - now_ts) / 60.0
+                                if mins_to_kick > self.schedule_lookahead_min:
+                                    continue
+                        except Exception:
+                            pass
+                    out[eid] = ev
+                    self._cycle_classification[eid] = "scheduled"
 
-            if len(out) > self.max_events:
-                out = out[: self.max_events]
-                logger.info(f"⚡ Limited to {self.max_events} events")
+            filtered: List[Dict[str, Any]] = []
+            live_cnt = 0
+            scheduled_cnt = 0
+            finished_cnt = 0
+            for eid, ev in out.items():
+                status = ((ev.get("status") or {}).get("type")) if isinstance(ev.get("status"), dict) else (ev.get("status"))
+                if isinstance(status, dict):
+                    status = status.get("type")
+                if isinstance(status, str):
+                    self._last_status[eid] = status
+                finished = str(status).lower() in {"finished", "after overtime", "after penalties", "ft"}
+                if finished and eid not in self._finished_timestamp:
+                    self._finished_timestamp[eid] = now_ts
+                if finished:
+                    grace_passed = (now_ts - self._finished_timestamp.get(eid, now_ts)) / 60.0 > self.finished_grace_min
+                    if grace_passed and eid in self._finished_processed:
+                        continue
+                    self._cycle_classification[eid] = "finished"
+                    finished_cnt += 1
+                else:
+                    cls = self._cycle_classification.get(eid)
+                    if cls == "live":
+                        live_cnt += 1
+                    elif cls == "scheduled":
+                        scheduled_cnt += 1
+                filtered.append(ev)
 
-            logger.info(f"📦 Fetched {len(out)} raw events")
-            return out
+            if len(filtered) > self.max_events:
+                limited_from = len(filtered)
+                filtered = filtered[: self.max_events]
+                logger.info(f"⚡ Limited to {self.max_events} events (from {limited_from}) – increase MAX_EVENTS env to raise cap")
+            logger.info(f"📦 Fetched {len(filtered)} raw events | live_total={self._last_live_count} live_processed={live_cnt} scheduled_processed={scheduled_cnt} finished_processed={finished_cnt}")
+            return filtered
         except Exception as e:
             logger.error(f"❌ Fetch failed: {e}")
             return []
 
     async def _enrich_phase(self, raw_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        logger.info(f"🔍 Phase 2: Enriching {len(raw_events)} events...")
+        """Phase 2: Enrich events using unified enrich_event (same as historical ingest)."""
+        logger.info(f"🔍 Phase 2: Enriching {len(raw_events)} events (unified)...")
         enriched: List[Dict[str, Any]] = []
+        now_ts = time.time()
         for i, ev in enumerate(raw_events):
             try:
                 ev_id = self._extract_event_id(ev)
                 if not ev_id:
                     continue
-                row = {"event": ev, "event_id": ev_id}
-
-                # lineups (+ formations + team ids)
-                lu = self._safe_fetch(f"event/{ev_id}/lineups")
-                if lu:
-                    row["lineups"] = self._parse_lineups(lu)
-                    row["homeFormation"] = self._extract_formation(lu, "home")
-                    row["awayFormation"] = self._extract_formation(lu, "away")
-                    row["home_team_sofa"] = self._extract_team_id(lu, "home")
-                    row["away_team_sofa"] = self._extract_team_id(lu, "away")
-
-                # incidents
-                inc = self._safe_fetch(f"event/{ev_id}/incidents")
-                if inc:
-                    row["events"] = self._parse_incidents(inc)
-
-                # stats (raw – kasnije pretvori StatsProcessor)
-                st = self._safe_fetch(f"event/{ev_id}/statistics")
-                if st:
-                    row["_raw_statistics"] = st
-
-                # Intentionally skip player-statistics endpoint; it's unreliable (often 404)
-                # and leads to zeroed player stats when absent. We'll derive what we can
-                # from other sources (lineups, team statistics) and leave player_stats empty.
-
-                # managers (nije nužno, ali zgodno)
-                mgr = self._safe_fetch(f"event/{ev_id}/managers")
-                if mgr:
-                    row["managers"] = self._parse_managers(mgr)
-
-                enriched.append(row)
+                cls = self._cycle_classification.get(ev_id)
+                starts = ev.get("startTimestamp") or ev.get("startTime")
+                mins_to_kick = None
+                if isinstance(starts, (int, float)):
+                    mins_to_kick = (starts - now_ts) / 60.0
+                status = (ev.get("status") or {}).get("type") if isinstance(ev.get("status"), dict) else ev.get("status")
+                status_l = str(status).lower() if status else ""
+                finished_like = status_l in {"finished", "after overtime", "after penalties", "ft"}
+                heavy = True  # default
+                if cls == "scheduled" and mins_to_kick is not None and mins_to_kick > self.schedule_lookahead_min:
+                    heavy = False
+                if finished_like:
+                    fin_ts = self._finished_timestamp.get(ev_id)
+                    if fin_ts and (time.time() - fin_ts)/60.0 > self.finished_grace_min:
+                        heavy = False
+                enriched.append(enrich_event(self.browser, ev, heavy=heavy))
             except Exception as e:
-                logger.warning(f"⚠️ Enrich failed for event #{i+1}: {e}")
+                logger.warning(f"⚠️ Enrich failed eid={ev.get('id')} idx={i}: {e}")
         logger.info(f"✅ Enriched {len(enriched)} events")
+        try:
+            heavy_count = sum(1 for e in enriched if e.get("_raw_shots") or e.get("statistics") or e.get("events"))
+            light_count = len(enriched) - heavy_count
+            logger.info(f"🧪 Enrichment split: heavy={heavy_count} light={light_count}")
+        except Exception:
+            pass
         return enriched
 
     def _processing_phase(self, enriched_events: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -139,14 +309,13 @@ class FetchLoop:
             mp = MatchProcessor()
             bundle = mp.process(enriched_events)
 
-            # dodatno: pretvori raw stats kroz StatsProcessor
+            # Convert match-level stats (enrich_event stores under 'statistics')
             all_match_stats, all_player_stats = [], []
             for ee in enriched_events:
                 eid = ee.get("event_id")
-                if ee.get("_raw_statistics"):
-                    all_match_stats.extend(stats_processor.process_match_stats(ee["_raw_statistics"], eid))
-                # Skipping processing of player-level stats from the player-statistics endpoint
-                # because we no longer fetch it in enrichment.
+                if ee.get("statistics"):
+                    all_match_stats.extend(stats_processor.process_match_stats(ee["statistics"], eid))
+                # Player stats: still optional; rely on per-player enrichment inside enrich_event if needed
 
             if all_match_stats:
                 bundle["match_stats"] = all_match_stats
@@ -156,6 +325,18 @@ class FetchLoop:
             # log
             for k in ("competitions", "teams", "players", "matches", "lineups", "formations", "events", "player_stats", "match_stats"):
                 logger.info(f"   • {k}: {len(bundle.get(k, []))}")
+
+            # Build standings opportunistically: only if we processed some matches
+            try:
+                if bundle.get("matches"):
+                    std_rows = build_standings(self.browser, enriched_events)
+                    if std_rows:
+                        bundle["standings"] = std_rows
+                        logger.info(f"   • standings: {len(std_rows)} (added)")
+                    else:
+                        logger.debug("[standings] none built this cycle")
+            except Exception as e:
+                logger.debug(f"[standings] build error skipped: {e}")
             return bundle
         except Exception as e:
             import traceback
@@ -236,10 +417,51 @@ class FetchLoop:
                 res["matches"] = {"ok": ok, "fail": fail}; total += ok
                 logger.info(f"✅ matches:      ok={ok}, fail={fail}")
 
+                # Build / upsert live match_state snapshot for these matches (only if we have source ids mapped afterwards)
+                try:
+                    # We'll fill match_id after we build map (requires DB ids). So temporarily store raw snapshot intents.
+                    match_state_intents: List[Dict[str, Any]] = []
+                    for m in matches:
+                        # skip if obviously not live-ish and no minute change (still allow finished for final snapshot)
+                        state_row = {
+                            "_src": m.get("source"),
+                            "_sid": m.get("source_event_id"),
+                            "status": m.get("status"),
+                            "status_type": m.get("status_type") or m.get("status"),
+                            "minute": m.get("minute"),
+                            "home_score": m.get("home_score"),
+                            "away_score": m.get("away_score"),
+                            # updated_at left for DB trigger; we can still send a value
+                            "updated_at": datetime.utcnow().isoformat(),
+                        }
+                        match_state_intents.append(state_row)
+                except Exception as ex_ms_int:
+                    logger.debug(f"[match_state] build intents skipped: {ex_ms_int}")
+
             # get match map for FKs
             match_map = db.get_match_ids_by_source_ids(
                 [(m["source"], m["source_event_id"]) for m in matches if m.get("source") and m.get("source_event_id")]
             ) if matches else {}
+            # If we prepared match_state intents, resolve match_id now and upsert
+            try:
+                if matches:
+                    intents = locals().get("match_state_intents") or []
+                    ms_rows: List[Dict[str, Any]] = []
+                    for it in intents:
+                        src = it.get("_src"); sid = it.get("_sid")
+                        if src and sid is not None:
+                            key = (src, int(sid))
+                            mid = match_map.get(key)
+                            if mid:
+                                row = {k: v for k, v in it.items() if not k.startswith("_")}
+                                row["match_id"] = mid
+                                ms_rows.append(row)
+                    if ms_rows:
+                        ms_ok, ms_fail = db.upsert_match_state(ms_rows)
+                        res["match_state"] = {"ok": ms_ok, "fail": ms_fail}; total += ms_ok
+                        logger.info(f"✅ match_state:  ok={ms_ok}, fail={ms_fail}")
+            except Exception as ex_ms:
+                logger.debug(f"[match_state] upsert skipped: {ex_ms}")
             player_map = db.get_player_ids_by_sofa(
                 [p["sofascore_id"] for p in bundle.get("players", [])]
             ) if bundle.get("players") else {}
@@ -345,6 +567,19 @@ class FetchLoop:
                 res["match_stats"] = {"ok": ok, "fail": fail}; total += ok
                 logger.info(f"✅ match_stats:  ok={ok}, fail={fail}")
 
+            # Mark finished events as processed (so we can skip after grace)
+            for m in bundle.get("matches", []):
+                status = (m.get("status") or "").lower()
+                eid = m.get("source_event_id") or m.get("event_id") or m.get("sofascore_event_id")
+                if isinstance(eid, str):
+                    try:
+                        eid = int(eid)
+                    except Exception:
+                        eid = None
+                if eid and status in {"finished", "after overtime", "after penalties", "ft"}:
+                    self._finished_processed.add(eid)
+            # Persist finished set
+            self._save_finished_state()
             res["total_stored"] = total
             return res
         except Exception as e:
@@ -372,57 +607,7 @@ class FetchLoop:
                     pass
         return None
 
-    def _parse_lineups(self, data: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
-        res = {"home": [], "away": []}
-        for side in ("home", "away"):
-            side_data = data.get(side) or {}
-            for row in side_data.get("players") or []:
-                pl = row.get("player") or {}
-                res[side].append({
-                    "player": {"id": pl.get("id"), "name": pl.get("name")},
-                    "jerseyNumber": row.get("jerseyNumber"),
-                    "position": row.get("position"),
-                    "isCaptain": bool(row.get("isCaptain")),
-                    "isStarting": bool(row.get("isStarting")),
-                })
-        return res
-
-    def _extract_formation(self, data: Dict[str, Any], side: str) -> Optional[str]:
-        node = data.get(side) or {}
-        return node.get("formation")
-
-    def _extract_team_id(self, data: Dict[str, Any], side: str) -> Optional[int]:
-        node = data.get(side) or {}
-        t = node.get("team") or {}
-        return t.get("id")
-
-    def _parse_incidents(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
-        res: List[Dict[str, Any]] = []
-        incs = data.get("incidents") or []
-        for inc in incs:
-            side = "home" if inc.get("isHome") else "away"
-            minute = None
-            if isinstance(inc.get("time"), dict):
-                minute = inc["time"].get("minute")
-            minute = minute or inc.get("minute")
-            pl = inc.get("player") or {}
-            res.append({
-                "minute": minute,
-                "type": inc.get("incidentType"),
-                "team": side,
-                "player_name": pl.get("name"),
-                "description": inc.get("text"),
-                "card_color": inc.get("color"),
-            })
-        return res
-
-    def _parse_managers(self, data: Dict[str, Any]):
-        out = {"home": None, "away": None}
-        for side in ("home", "away"):
-            m = data.get(side) or data.get(f"{side}Manager")
-            if isinstance(m, dict):
-                out[side] = {"id": m.get("id"), "name": m.get("name")}
-        return out
+    # Legacy parser helpers removed – enrichment now delegated to enrich_event
 
 
 # ------------- standalone -------------

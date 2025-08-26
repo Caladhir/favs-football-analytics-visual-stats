@@ -1,8 +1,12 @@
 # scraper/core/config.py 
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 import sys
+try:
+    from dotenv import load_dotenv  # type: ignore
+except Exception:  # fallback if python-dotenv not installed
+    def load_dotenv(*args, **kwargs):
+        return False
 
 # Encoding setup
 sys.stdout.reconfigure(encoding='utf-8')
@@ -10,6 +14,9 @@ sys.stdout.reconfigure(encoding='utf-8')
 # Load environment variables
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(dotenv_path=BASE_DIR / ".env.local")
+
+# Allow-list of uniqueTournament IDs (optional performance filter)
+_manual_allow = {int(x) for x in os.getenv("SOFA_TOURNAMENTS_ALLOW", "").split(",") if x.strip().isdigit()}
 
 class Config:
     """Centralizirane konfiguracije za scraper"""
@@ -259,5 +266,16 @@ class Config:
 # Validate configuration on import
 Config.validate_config()
 
-# Export main config instance
 config = Config()
+
+# Manual allow-list only. Dynamic TOP N & name expansion handled in utils.leagues_filter to avoid
+# network side-effects on import here. If empty, downstream helper will lazily compute.
+SOFA_TOURNAMENTS_ALLOW: set[int] = _manual_allow
+if SOFA_TOURNAMENTS_ALLOW:
+    try:
+        import logging
+        logging.getLogger(__name__).info(
+            f"[allowlist.manual] tournaments={len(SOFA_TOURNAMENTS_ALLOW)} sample={list(SOFA_TOURNAMENTS_ALLOW)[:10]}"
+        )
+    except Exception:
+        pass

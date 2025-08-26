@@ -42,7 +42,7 @@ def extract_player_stats_from_sofa(stat: dict) -> dict:
         "shots_on_target":  _to_int(stat.get("onTargetScoringAttempt") or stat.get("shotsOnTarget") or stat.get("onTargetShots")),
         "minutes_played":   _to_int(stat.get("minutesPlayed") or stat.get("minutes")),
         "touches":          _to_int(stat.get("touches") or stat.get("ballTouches") or stat.get("touchesCount") or stat.get("totalTouches")),
-        "rating":           rating,
+    "rating":           rating,
         # is_substitute/was_subbed_in/was_subbed_out popuni iz subs/lineups procesora (ne iz ovog endpointa)
     }
 
@@ -256,31 +256,36 @@ class StatsProcessor:
                 is_starting = bool(p.get("isStarting") or p.get("starting"))
                 sub_in_time = p.get("subbedInTime") or stats.get("subbedInTime")
                 sub_out_time = p.get("subbedOutTime") or stats.get("subbedOutTime")
-                explicit_is_sub = p.get("isSubstitute") or p.get("substitute")
-                # Minutes: we now fully trust SofaScore minutesPlayed; no recalculation or inference.
-                minutes_played_current = rec.get("minutes_played")
+                explicit_is_sub = p.get("isSubstitute")
+                if explicit_is_sub is None:
+                    explicit_is_sub = p.get("substitute")
 
-                # is_substitute flag: prefer explicit; else infer from is_starting
-                if explicit_is_sub is not None:
-                    rec["is_substitute"] = bool(explicit_is_sub)
-                else:
-                    if is_starting:
-                        rec["is_substitute"] = False
-                    elif minutes_played_current is not None:
-                        # if not starting and has minutes >0 it's a sub, else will be handled in bench section
-                        rec["is_substitute"] = True
-
+                # Determine raw participation flags from incidents/lineups
+                was_in = False
+                was_out = False
                 if sub_in_time is not None:
-                    rec["was_subbed_in"] = True
+                    was_in = True
                 if sub_out_time is not None:
+                    was_out = True
+                if subbed_in_ids and pid in subbed_in_ids:
+                    was_in = True
+                if subbed_out_ids and pid in subbed_out_ids:
+                    was_out = True
+                if was_in:
+                    rec["was_subbed_in"] = True
+                if was_out:
                     rec["was_subbed_out"] = True
 
-                if subbed_in_ids and pid in subbed_in_ids:
-                    rec["was_subbed_in"] = True
-                    if rec.get("is_substitute") is False and not is_starting:
-                        rec["is_substitute"] = True
-                if subbed_out_ids and pid in subbed_out_ids:
-                    rec["was_subbed_out"] = True
+                minutes_played_current = rec.get("minutes_played")
+                # Final is_substitute semantics (stricter):
+                #  True  => explicit flag True OR evidence of coming on (sub_in_time / incidents set)
+                #  False => otherwise (either starter or unused bench). We DO NOT infer True from minutes alone.
+                if explicit_is_sub is True:
+                    rec["is_substitute"] = True
+                elif was_in:
+                    rec["is_substitute"] = True
+                else:
+                    rec["is_substitute"] = False
 
                 # If player has minutes (participated) ensure missing count stats become 0 (avoid NULL overwrites later)
                 if rec.get("minutes_played") is not None and rec.get("minutes_played") > 0:
@@ -316,7 +321,8 @@ class StatsProcessor:
                 # Bench unused: assign 0 minutes + zeros if truly unused
                 if rec.get("minutes_played") is None and not is_starting and not rec.get("was_subbed_in"):
                     rec["minutes_played"] = 0
-                    rec["is_substitute"] = True if rec.get("is_substitute") is not False else rec.get("is_substitute")
+                    if rec.get("is_substitute") is True and explicit_is_sub is None:
+                        rec["is_substitute"] = False
                     for k in ("goals","assists","shots_total","shots_on_target","passes","tackles","touches"):
                         if rec.get(k) is None:
                             rec[k] = 0

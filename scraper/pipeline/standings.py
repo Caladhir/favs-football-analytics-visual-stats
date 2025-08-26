@@ -73,30 +73,86 @@ def fetch_competition_standings(browser: Any, comp_sofa: int, season_id: Optiona
 
 _processor = StandingsProcessor()
 
+# Debounce cache: (utid, season_name) -> last_fetch_epoch
+_LAST_FETCH: Dict[Tuple[int,str], float] = {}
+_MIN_INTERVAL = float(__import__('os').getenv('STANDINGS_MIN_INTERVAL_SECONDS', '180'))  # 3 minute default
+
 def build_standings(browser: Any, enriched_events: List[Dict[str, Any]], throttle: float = 0.0) -> List[Dict[str, Any]]:
-    """Derive (competition, season) pairs from enriched events, fetch standings once per pair, parse.
-    Returns list of raw standings rows with sofascore identifiers (competition_sofascore_id, team_sofascore_id,...)
+    """Derive (uniqueTournament, season) pairs from events and fetch standings once per pair.
+
+    Rationale: elsewhere (competitions table) primarni ključ koristimo unique tournament ID (stabilan kroz sezone).
+    Prethodna verzija je koristila season-specific tournament.id što je znalo uzrokovati mismatch pri mapiranju
+    standings -> competitions (competition_sofascore_id nije postojao jer je competitions držao unique id).
+
+    Ovdje:
+      * Primarni key za combo = uniqueTournament.id (utid). Ako nedostaje, fallback na tournament.id.
+      * Čuvamo i season_tournament_id (tid) radi dijagnostike.
+      * U fetch pokušajima koristimo utid kao 'comp_sofa' – varijante već pokrivaju i unique-tournament/{c}.* pa će raditi.
     """
-    combos: Dict[Tuple[int,str], int] = {}  # (comp_sofa, season_name) -> season_id (maybe None)
+    combos: Dict[Tuple[int,str], Dict[str, Optional[int]]] = {}
     for enr in enriched_events:
         base = enr.get("event") or {}
         comp_obj = base.get("tournament") or base.get("competition") or {}
-        comp_sofa = comp_obj.get("id") if isinstance(comp_obj, dict) else None
+        if not isinstance(comp_obj, dict):
+            continue
+        tid_season = comp_obj.get("id")
+        ut_obj = comp_obj.get("uniqueTournament") if isinstance(comp_obj.get("uniqueTournament"), dict) else {}
+        utid = ut_obj.get("id") if isinstance(ut_obj, dict) else None
+        primary_id = utid or tid_season
+        if not primary_id:
+            continue
         season_obj = base.get("season") or {}
         season_name = season_obj.get("name") if isinstance(season_obj, dict) else None
         season_id = season_obj.get("id") if isinstance(season_obj, dict) else None
-        if comp_sofa and season_name:
-            combos.setdefault((int(comp_sofa), season_name), season_id)
+        if primary_id and not season_name and season_id:
+            season_name = str(season_id)
+        if primary_id and season_name:
+            key = (int(primary_id), str(season_name))
+            combos.setdefault(key, {"season_id": season_id, "utid": utid, "tid": tid_season})
+    if not combos:
+        logger.debug("[standings] no (uniqueTournament, season) combos derived – skip")
     rows: List[Dict[str, Any]] = []
-    for (comp_sofa, season_name), season_id in combos.items():
-        raw, path = fetch_competition_standings(browser, comp_sofa, season_id, throttle=throttle)
+    logger.debug(f"[standings] combos={len(combos)} sample={[ (k[0], v.get('tid')) for k,v in list(combos.items())[:5] ]}")
+    # Determine finished events per competition (force refresh when a match just finished)
+    finished_comp: Set[int] = set()
+    try:
+        for enr in enriched_events:
+            base = enr.get("event") or {}
+            st = (base.get("status") or {}).get("type") or (base.get("status") or {}).get("description")
+            comp_obj = base.get("tournament") or base.get("competition") or {}
+            ut_obj = comp_obj.get("uniqueTournament") if isinstance(comp_obj.get("uniqueTournament"), dict) else {}
+            utid = (ut_obj.get("id") if isinstance(ut_obj, dict) else None) or comp_obj.get("id")
+            if utid and st and str(st).lower() in {"finished","afteret","aft","ft"}:
+                finished_comp.add(int(utid))
+    except Exception:
+        finished_comp = set()
+    for (comp_utid, season_name), meta in combos.items():
+        season_id = meta.get("season_id")
+        key = (comp_utid, season_name)
+        now = time.time()
+        last = _LAST_FETCH.get(key, 0)
+        age = now - last
+        force = comp_utid in finished_comp
+        if age < _MIN_INTERVAL and not force:
+            logger.debug(f"[standings] debounce skip utid={comp_utid} season={season_name} age={int(age)}s < {_MIN_INTERVAL}s")
+            continue
+        raw, path = fetch_competition_standings(browser, comp_utid, season_id, throttle=throttle)
         if not raw:
-            logger.debug(f"[standings] no data comp={comp_sofa} season={season_name}")
+            logger.debug(f"[standings] no data utid={comp_utid} tid={meta.get('tid')} season={season_name}")
             continue
         try:
-            parsed = _processor.parse(raw, comp_sofa, season_name)
+            parsed = _processor.parse(raw, comp_utid, season_name)
+            # Augment each row with original season tournament id if available (debug only – store layer can ignore)
+            if meta.get("tid") and meta.get("tid") != comp_utid:
+                for r in parsed:
+                    r.setdefault("season_tournament_sofascore_id", meta.get("tid"))
             rows.extend(parsed)
-            logger.info(f"[standings] comp={comp_sofa} season={season_name} rows={len(parsed)} via={path}")
+            logger.info(f"[standings] utid={comp_utid} tid={meta.get('tid')} season={season_name} rows={len(parsed)} via={path}")
+            _LAST_FETCH[key] = now
         except Exception as e:
-            logger.debug(f"[standings] parse fail comp={comp_sofa} season={season_name}: {e}")
+            logger.debug(f"[standings] parse fail utid={comp_utid} tid={meta.get('tid')} season={season_name}: {e}")
+    if rows:
+        logger.debug(f"[standings] total_rows={len(rows)}")
+    else:
+        logger.debug("[standings] total_rows=0")
     return rows
