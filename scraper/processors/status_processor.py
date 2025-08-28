@@ -41,8 +41,22 @@ class StatusProcessor:
     """Minimalist normalizacija statusa i rezultata."""
     def parse(self, event: Dict[str, Any]) -> Dict[str, Any]:
         s = event.get("status", {}) or {}
-        raw_desc = s.get("description") or s.get("type") or event.get("statusType")
-        status = normalize_status(raw_desc)
+        # Prefer the machine readable 'type' (e.g. inprogress, finished, notstarted) over the human description
+        # because descriptions like "1st half", "2nd half", "AET" are NOT in our normalised map and were causing
+        # live matches to be mis-labelled as 'upcoming'. Fallback to description only if type missing.
+        raw_type = s.get("type") or event.get("statusType")
+        raw_desc = s.get("description")
+        chosen = raw_type or raw_desc
+        status = normalize_status(chosen)
+        # Additional guard: if type indicates live but description caused fallback earlier, force 'live'
+        try:
+            if raw_type and normalize_status(raw_type) == 'live':
+                status = 'live'
+            # Half-time detection: description sometimes "HT" or "Half Time" while type still inprogress
+            if raw_desc and str(raw_desc).lower().replace(' ', '') in {'halftime','ht'}:
+                status = 'ht'
+        except Exception:
+            pass
 
         # Score modeli (SofaScore često ima {current, period1, period2} ...)
         def _score(side: str, key: str) -> Optional[int]:

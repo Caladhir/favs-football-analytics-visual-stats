@@ -127,7 +127,7 @@ export default function CalendarPopover({
   };
 
   return (
-    <div className="relative flex items-center justify-center gap-3 mt-8 mb-6">
+    <div className="relative flex items-center justify-center gap-3 m-8 mb-6">
       {/* Previous Day Button */}
       <button
         onClick={() => handleChange(-1)}
@@ -156,9 +156,10 @@ export default function CalendarPopover({
 
         {/* Dropdown indicator */}
         <div
-          className={`transition-transform duration-300 relative z-10 ${
+          className={`transition-transform duration-300 relative ${
             open ? "rotate-180" : ""
           }`}
+          aria-hidden
         >
           <svg
             className="w-4 h-4"
@@ -205,7 +206,7 @@ export default function CalendarPopover({
       {open && (
         <div
           ref={popoverRef}
-          className="absolute mt-4 top-full left-1/2 -translate-x-1/2 w-96 rounded-2xl bg-gradient-to-br from-gray-900/95 to-black/95 backdrop-blur-xl text-white shadow-2xl border border-red-500/30 p-6 z-50"
+          className="absolute mt-4 top-full left-1/2 -translate-x-1/2 w-96 rounded-2xl bg-gradient-to-br from-gray-900/95 to-black/95 backdrop-blur-xl text-white shadow-2xl border border-red-500/30 p-6 z-[10000]"
         >
           {/* Header */}
           <div className="flex justify-between items-center mb-6">

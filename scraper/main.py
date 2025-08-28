@@ -22,11 +22,11 @@ except Exception:
 
 logger = get_logger(__name__)
 
-# --- fetch_loop import (radi i kao scraper.fetch_loop i kao fetch_loop) ---
+# --- fetch_loop import (import only FetchLoop which exists in current fetch_loop.py) ---
 try:
-    from scraper.fetch_loop import main as loop_main, run_once, fetch_raw, FetchLoop
+    from scraper.fetch_loop import FetchLoop
 except Exception:
-    from fetch_loop import main as loop_main, run_once, fetch_raw, FetchLoop  # type: ignore
+    from fetch_loop import FetchLoop  # type: ignore
 
 def cli():
     """Command line interface"""
@@ -39,21 +39,48 @@ def cli():
 
     if args.once:
         logger.info("main | Running single cycle...")
-        success = run_once(date_str=args.date)
-        if success:
-            logger.info("✅ Single cycle completed successfully")
-        else:
-            logger.error("❌ Single cycle failed")
-        sys.exit(0 if success else 1)
-    else:
-        logger.info("main | Running continuous loop...")
+        # run a single async cycle using the current FetchLoop API
+        import asyncio
         loop = FetchLoop()
         try:
-            loop.run_continuous(interval=args.interval, max_failures=args.max_failures)
+            loop = FetchLoop()
+            # FetchLoop.run_cycle() does not accept parameters in the current API
+            # so call it without passing date_str.
+            res = asyncio.run(loop.run_cycle()) if hasattr(loop, 'run_cycle') else asyncio.run(loop.run_once())
+            ok = bool(isinstance(res, dict) and res.get('success')) or bool(res)
+            if ok:
+                logger.info("✅ Single cycle completed successfully")
+            else:
+                logger.error("❌ Single cycle failed")
+            sys.exit(0 if ok else 1)
+        except AttributeError:
+            # Fallback: try a synchronous method if available
+            try:
+                success = loop.run_once(date_str=args.date)  # type: ignore
+                sys.exit(0 if success else 1)
+            except Exception as e:
+                logger.error(f"main | Single cycle failed fallback: {e}")
+                sys.exit(2)
+    else:
+        logger.info("main | Running continuous loop... (uses FetchLoop.run_cycle in interval)")
+        import time, asyncio
+        fl = FetchLoop()
+        try:
+            while True:
+                try:
+                    asyncio.run(fl.run_cycle())
+                except Exception as e:
+                    logger.error(f"Error during run_cycle: {e}")
+                time.sleep(args.interval)
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
         finally:
-            loop._cleanup()
+            # best-effort cleanup
+            try:
+                if hasattr(fl, '_cleanup'):
+                    fl._cleanup()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     cli()

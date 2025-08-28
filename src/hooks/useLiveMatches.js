@@ -1,6 +1,7 @@
 // src/hooks/useLiveMatches.js
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import supabase from "../services/supabase";
+import { parseMatchISO } from "../utils/formatMatchTime";
 
 const INTERVALS = {
   ultra: 2000, // >50 live
@@ -20,6 +21,8 @@ export function useLiveMatches() {
   const mountedRef = useRef(true);
   const timerRef = useRef(null);
   const lastRealtimeAtRef = useRef(0);
+  const lastFetchAtRef = useRef(0);
+  const MIN_FETCH_MS = 800;
 
   const liveCount = useMemo(() => matches.length, [matches]);
 
@@ -32,20 +35,35 @@ export function useLiveMatches() {
 
   const fetchOnce = useCallback(async (foreground = false) => {
     if (!mountedRef.current) return;
+    const now = Date.now();
+    // if a very recent fetch happened, skip unless foreground
+    if (!foreground && now - lastFetchAtRef.current < MIN_FETCH_MS) return;
+    // prevent overlapping fetches
+    if (fetchOnce._inFlight) return;
+    fetchOnce._inFlight = true;
+    lastFetchAtRef.current = now;
 
     foreground ? setLoading(true) : setBackgroundRefreshing(true);
     setError(null);
 
     try {
       const fourMinAgo = new Date(Date.now() - 4 * 60 * 1000).toISOString();
-      const { data: rows, error: err } = await supabase
+      // For foreground (initial/manual) fetches, don't restrict by `updated_at` so
+      // matches recently marked live but not updated within the last 4 minutes are still returned.
+      const query = supabase
         .from("matches")
         .select(
           "id,home_team,away_team,home_score,away_score,minute,status,competition,updated_at,start_time"
         )
-        .in("status", ["live", "ht"])
-        .gte("updated_at", fourMinAgo)
-        .order("updated_at", { ascending: false });
+        .in("status", ["live", "ht"]);
+
+      if (!foreground) {
+        query.gte("updated_at", fourMinAgo);
+      }
+
+      const { data: rows, error: err } = await query.order("updated_at", {
+        ascending: false,
+      });
 
       if (!mountedRef.current) return;
 
@@ -53,7 +71,19 @@ export function useLiveMatches() {
         setError(err.message || "Fetch error");
         setMatches([]);
       } else {
-        setMatches(rows ?? []);
+        // Filter out matches that are not actually started yet (start_time more than 10 minutes in future)
+        const now = Date.now();
+        const rowsFiltered = (rows || []).filter((r) => {
+          try {
+            const d = parseMatchISO(r.start_time);
+            if (!d) return true; // keep if unknown
+            // if start_time more than 10 minutes in the future, exclude from live list
+            return d.getTime() <= now + 10 * 60 * 1000;
+          } catch {
+            return true;
+          }
+        });
+        setMatches(rowsFiltered);
         setLastRefreshed(Date.now());
       }
     } catch (e) {
@@ -62,6 +92,7 @@ export function useLiveMatches() {
     } finally {
       if (!mountedRef.current) return;
       foreground ? setLoading(false) : setBackgroundRefreshing(false);
+      fetchOnce._inFlight = false;
     }
   }, []);
 
@@ -125,10 +156,14 @@ export function useLiveMatches() {
         fetchOnce(false);
       }
 
+      // Debounce/min interval: ensure at least 800ms between scheduled fetches
+      const nextInterval = Math.max(800, interval);
+
       timerRef.current = setTimeout(() => {
-        fetchOnce(false);
+        // guard: don't start a new fetch if one is still running
+        if (!fetchOnce._inFlight) fetchOnce(false);
         scheduleNext();
-      }, interval);
+      }, nextInterval);
     };
 
     // očisti prethodni

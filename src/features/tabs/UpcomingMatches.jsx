@@ -17,11 +17,6 @@ function startOfDay(d) {
   return x;
 }
 
-/* Dedupe po (home, away, start_time rounded to minute).
-   Ako isti par mečeva dolazi iz više izvora, preferiraj:
-   - source === 'sofascore'
-   - noviji updated_at
-*/
 function isStrictUpcoming(match, selectedDate, now = new Date()) {
   const status = normalizeStatus(match.status || match.status_type);
   // sve što NIJE “upcoming” makni
@@ -34,15 +29,12 @@ function isStrictUpcoming(match, selectedDate, now = new Date()) {
   const dayNow = startOfDay(now).getTime();
   const isToday = daySel === dayNow;
 
-  // ako je danas: prikaži samo buduće (uz malu grace marginu unatrag)
   if (isToday) {
     return start.getTime() >= now.getTime() - GRACE_MINUTES * 60 * 1000;
   }
 
-  // ako je odabrani dan u budućnosti: prikaži sve tog dana (backend već reže na taj dan)
   if (daySel > dayNow) return true;
 
-  // prošli dan: ništa od “upcoming”
   return false;
 }
 
@@ -81,15 +73,12 @@ export default function UpcomingMatches() {
   const sortedUpcoming = useMemo(() => {
     const now = new Date();
 
-    // 1) strogi upcoming filter
     const upcomingOnly = (matches || []).filter((m) =>
       isStrictUpcoming(m, selectedDate, now)
     );
 
-    // 2) dedupe
     const deduped = dedupeByTeamsTime(upcomingOnly);
 
-    // 3) sort po start_time
     deduped.sort(
       (a, b) =>
         new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
@@ -123,7 +112,7 @@ export default function UpcomingMatches() {
   const canGoPrev = selectedDate.getTime() > today.getTime();
 
   return (
-    <div className="min-h-screen bg-muted rounded-3xl p-1">
+    <div className="min-h-screen  rounded-3xl p-1">
       <UpcomingHeader
         selectedDate={selectedDate}
         setSelectedDate={setSelectedDate}

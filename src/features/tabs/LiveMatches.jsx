@@ -26,6 +26,7 @@ export default function LiveMatches() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   const prevCountRef = useRef(0);
+  const lastForceRef = useRef(0);
   const userPreferences = useUserPreferences();
 
   const {
@@ -48,18 +49,31 @@ export default function LiveMatches() {
   useEffect(() => {
     const currentCount = matches?.length ?? 0;
     const prevCount = prevCountRef.current;
+    const now = Date.now();
 
-    if (prevCount > 0 && Math.abs(currentCount - prevCount) >= 2) {
+    // Reduce sensitivity: only force-refresh on large changes and throttle
+    const diff = Math.abs(currentCount - prevCount);
+    const minDiffThreshold = 10; // require a noticeable change
+    const throttleMs = 30 * 1000; // don't force-refresh more often than every 30s
+
+    if (
+      prevCount > 0 &&
+      diff >= minDiffThreshold &&
+      now - lastForceRef.current > throttleMs &&
+      !backgroundRefreshing &&
+      !loading
+    ) {
       console.log(
-        `🚨 [FORCE REFRESH] Count changed: ${prevCount} → ${currentCount}`
+        `🚨 [FORCE REFRESH] Count changed: ${prevCount} → ${currentCount} (diff=${diff}), triggering background fetch`
       );
+      lastForceRef.current = now;
       setTimeout(() => {
         fetchLiveMatches(true);
       }, 1000);
     }
 
     prevCountRef.current = currentCount;
-  }, [matches?.length, fetchLiveMatches]);
+  }, [matches?.length, fetchLiveMatches, backgroundRefreshing, loading]);
 
   // Sorting with time sort integration
   const sortedMatches = useMemo(() => {
@@ -194,13 +208,6 @@ export default function LiveMatches() {
           variant="modern"
           className="rounded-full bg-gradient-to-r from-gray-700/80 to-gray-800/80 backdrop-blur-sm border-gray-600/30 hover:from-blue-600/80 hover:to-blue-700/80 hover:border-blue-500/40"
         />
-
-        {backgroundRefreshing && (
-          <div className="rounded-full bg-gradient-to-r from-blue-600/80 to-blue-700/80 backdrop-blur-sm text-white px-4 py-2  text-sm font-semibold shadow-lg border border-blue-500/30 flex items-center gap-2">
-            <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
-            Updating...
-          </div>
-        )}
       </div>
 
       {/* Sort indicator */}

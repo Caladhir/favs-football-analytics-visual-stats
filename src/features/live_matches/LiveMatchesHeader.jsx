@@ -26,13 +26,6 @@ export default function LiveMatchesHeader({
           </div>
         </div>
       )}
-
-      {/* Background refresh indicator */}
-      {backgroundRefreshing && (
-        <div className="absolute top-2 right-2">
-          <div className="w-6 h-6 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
-        </div>
-      )}
     </div>
   );
 }

@@ -15,14 +15,6 @@ export default function LiveMatchesStats({
             {topLeagues} Top League{topLeagues === 1 ? "" : "s"}
           </div>
         )}
-
-        {/* Background refresh indicator */}
-        {backgroundRefreshing && (
-          <div className="bg-gradient-to-r from-blue-600/80 to-blue-700/80 backdrop-blur-sm text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-lg border border-blue-500/30 flex items-center gap-2">
-            <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
-            Updating...
-          </div>
-        )}
       </div>
     </div>
   );

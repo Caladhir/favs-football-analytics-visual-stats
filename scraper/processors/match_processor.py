@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Any, Dict, List
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timezone, timedelta
 
 from .status_processor import status_processor
 from .team_processor import team_processor
@@ -21,10 +22,31 @@ def _get(dt_val) -> str:
         except Exception:
             return None
     if isinstance(dt_val, str):
+        s = dt_val.strip()
+        # Preferred: ISO with timezone (Z or +00:00) -> convert to UTC
         try:
-            return datetime.fromisoformat(dt_val.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+            return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
         except Exception:
-            return dt_val
+            # Fallbacks: numeric string -> timestamp
+            try:
+                if s.isdigit():
+                    ts = int(s)
+                    if ts > 10**12:
+                        ts = ts / 1000.0
+                    return datetime.utcfromtimestamp(ts).replace(tzinfo=timezone.utc).isoformat()
+            except Exception:
+                pass
+
+            # Try replacing space with T then assume local timezone for naive datetimes
+            try:
+                s2 = s.replace(" ", "T")
+                dt = datetime.fromisoformat(s2)
+                if dt.tzinfo is None:
+                    # Attach UTC for naive datetimes (provider timestamps should be canonical UTC)
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(timezone.utc).isoformat()
+            except Exception:
+                return None
     return None
 
 from utils.logger import get_logger
@@ -116,11 +138,30 @@ class MatchProcessor:
                 raw_status_desc = (base.get("status") or {}).get("description") or (base.get("status") or {}).get("type") or base.get("statusType")
             except Exception:
                 raw_status_desc = None
+            # Prefer currentPeriodStartTimestamp if present — it's often the most
+            # accurate indicator of when play actually started (fixes cases where
+            # scheduled-events or other snapshots contain stale startTimestamp).
+            cps_raw = (base.get("time") or {}).get("currentPeriodStartTimestamp")
             date_utc = _get(base.get("startTimestamp") or base.get("startTimeUTC") or base.get("startTime"))
+            # Determine canonical UTC start_time using a robust preference order:
+            # 1) explicit ISO fields (startTimeUTC, startTime)
+            # 2) numeric startTimestamp (epoch seconds/ms)
+            # Do NOT use currentPeriodStartTimestamp as start_time — it's for match runtime only.
+            date_utc = None
+            try:
+                candidates = [base.get("startTimeUTC"), base.get("startTime"), base.get("startTimestamp")]
+                for cand in candidates:
+                    v = _get(cand)
+                    if v:
+                        date_utc = v
+                        break
+            except Exception:
+                date_utc = None
             home_colors = (base.get("homeTeam") or {}).get("teamColors") or {}
             away_colors = (base.get("awayTeam") or {}).get("teamColors") or {}
             home_color = home_colors.get("primary") or "#222222"
             away_color = away_colors.get("primary") or "#222222"
+            # current_period_start normalized (if available)
             current_period_start = None
             try:
                 cps = (base.get("time") or {}).get("currentPeriodStartTimestamp")
@@ -175,6 +216,20 @@ class MatchProcessor:
             except Exception:
                 pass
 
+            if os.getenv("DEBUG_SCORE"):
+                try:
+                    _mp_logger.debug(
+                        f"[score.debug] ev={ev_id} raw_home_current={raw_home_current} raw_away_current={raw_away_current} eff=({eff_home_score}-{eff_away_score}) goal_events_count={goal_counts} raw_homeScore={(base.get('homeScore') or {})} raw_awayScore={(base.get('awayScore') or {})}"
+                    )
+                except Exception:
+                    pass
+
+            # Debug: log computed canonical and local start times and round label for verification
+            try:
+                _mp_logger.debug(f"[match_processor][computed] ev={ev_id} start_time={date_utc} round={((base.get('roundInfo') or {}).get('round') if isinstance(base.get('roundInfo'), dict) else None) or (base.get('roundInfo') or {}).get('name') or base.get('round')}")
+            except Exception:
+                pass
+
             matches.append({
                 "source": "sofascore",
                 "source_event_id": ev_id,
@@ -192,13 +247,16 @@ class MatchProcessor:
                 "final_away_score": eff_away_score if is_finished else None,
                 "competition_sofascore_id": (comp or {}).get("sofascore_id"),
                 "competition": comp_name,
-                "round": base.get("roundInfo", {}).get("round") if isinstance(base.get("roundInfo"), dict) else base.get("round"),
+                # Prefer numeric round id if present, then human label, then bare round
+                "round": ((base.get("roundInfo") or {}).get("round") if isinstance(base.get("roundInfo"), dict) else None) or (base.get("roundInfo") or {}).get("name") or base.get("round"),
                 "season": (base.get("season") or {}).get("name") if isinstance(base.get("season"), dict) else base.get("season"),
                 "venue": venue_name,
                 "status_type": raw_status_desc,
                 "home_color": home_color,
                 "away_color": away_color,
                 "current_period_start": current_period_start,
+                # canonical UTC start_time (DB canonical)
+                "start_time": date_utc,
                 "is_finished": is_finished,
             })
 

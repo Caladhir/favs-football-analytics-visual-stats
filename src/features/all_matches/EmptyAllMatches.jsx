@@ -1,4 +1,5 @@
-// src/features/all_matches/EmptyAllMatches.jsx - REDESIGNED WITH MODERN STYLING
+// src/features/all_matches/EmptyAllMatches.jsx - DODATI DEBUGGING
+import React, { useEffect } from "react";
 import CalendarPopover from "../tabs/CalendarPopover";
 
 export default function EmptyAllMatches({
@@ -6,6 +7,15 @@ export default function EmptyAllMatches({
   setSelectedDate,
   onRefresh,
 }) {
+  // 🔧 DODANO: Debug logging za praćenje problema
+  useEffect(() => {
+    console.log("🐛 EmptyAllMatches Debug:", {
+      selectedDate: selectedDate?.toISOString(),
+      selectedDateString: selectedDate?.toDateString(),
+      timestamp: Date.now(),
+    });
+  }, [selectedDate]);
+
   const isToday = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -14,70 +24,63 @@ export default function EmptyAllMatches({
     return today.getTime() === selected.getTime();
   };
 
-  const isYesterday = () => {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    yesterday.setHours(0, 0, 0, 0);
-    const selected = new Date(selectedDate);
-    selected.setHours(0, 0, 0, 0);
-    return yesterday.getTime() === selected.getTime();
-  };
-
-  const isTomorrow = () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0);
-    const selected = new Date(selectedDate);
-    selected.setHours(0, 0, 0, 0);
-    return tomorrow.getTime() === selected.getTime();
-  };
-
   const getEmptyMessage = () => {
-    if (isToday()) return "No matches today";
-    if (isYesterday()) return "No matches yesterday";
-    if (isTomorrow()) return "No matches tomorrow";
-    return "No matches found";
+    if (isToday()) return "Nema utakmica danas";
+
+    // 🔧 DODANO: Provjeri je li datum u budućnosti
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selected = new Date(selectedDate);
+    selected.setHours(0, 0, 0, 0);
+
+    if (selected > today) {
+      return "Nema najavljenih utakmica za ovaj datum";
+    }
+
+    return "Nema utakmica za odabrani datum";
   };
 
   const getSuggestion = () => {
-    if (isToday()) {
-      return "There are no football matches scheduled for today. Try checking tomorrow or another date.";
+    const today = new Date();
+    const selected = new Date(selectedDate);
+
+    if (selected.toDateString() === today.toDateString()) {
+      return "Možda trenutno nema utakmica. Pokušajte provjeriti sutra ili neki drugi datum.";
     }
-    if (isYesterday()) {
-      return "No matches were played yesterday. Try checking today or another date.";
-    }
-    if (isTomorrow()) {
-      return "No matches are scheduled for tomorrow yet. Check back later or try another date.";
-    }
-    return "No matches are available for the selected date. Try choosing a different date.";
+
+    return "Pokušajte odabrati drugi datum ili osvježiti podatke.";
   };
 
+  // Quick actions s 🔧 POPRAVKOM: Clean date creation
   const getQuickActions = () => {
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
+
     const tomorrow = new Date(today);
     tomorrow.setDate(today.getDate() + 1);
 
     return [
       {
-        label: "Today",
+        label: "Danas",
         date: today,
-        disabled: isToday(),
+        disabled: selectedDate.toDateString() === today.toDateString(),
         icon: "📅",
         color: "from-blue-500 to-blue-600",
       },
       {
-        label: "Yesterday",
+        label: "Jučer",
         date: yesterday,
-        disabled: isYesterday(),
+        disabled: selectedDate.toDateString() === yesterday.toDateString(),
         icon: "🌅",
         color: "from-orange-500 to-orange-600",
       },
       {
-        label: "Tomorrow",
+        label: "Sutra",
         date: tomorrow,
-        disabled: isTomorrow(),
+        disabled: selectedDate.toDateString() === tomorrow.toDateString(),
         icon: "🌄",
         color: "from-purple-500 to-purple-600",
       },
@@ -89,7 +92,7 @@ export default function EmptyAllMatches({
       {/* Status Badge */}
       <div className="flex justify-center pt-6">
         <div className="bg-gradient-to-r from-gray-700 to-gray-800 text-white px-6 py-3 rounded-full text-sm font-bold shadow-lg backdrop-blur-sm border border-gray-600/30">
-          📅 All Matches
+          📅 Sve utakmice - {selectedDate.toLocaleDateString("hr-HR")}
         </div>
       </div>
 
@@ -119,43 +122,51 @@ export default function EmptyAllMatches({
           {getQuickActions().map((action) => (
             <button
               key={action.label}
-              onClick={() => setSelectedDate(action.date)}
+              onClick={() => {
+                console.log(
+                  `🔄 Quick action clicked: ${action.label}`,
+                  action.date
+                );
+                setSelectedDate(action.date);
+              }}
               disabled={action.disabled}
-              className={`group relative overflow-hidden px-6 py-4 rounded-xl font-semibold transition-all duration-300 flex items-center gap-3 min-w-[140px] justify-center shadow-lg hover:shadow-2xl ${
-                action.disabled
-                  ? "bg-gradient-to-r from-gray-700/50 to-gray-800/50 text-gray-400 cursor-not-allowed border border-gray-600/30"
-                  : `bg-gradient-to-r ${action.color} text-white hover:scale-105 border border-white/20 hover:border-white/40`
-              }`}
+              className={`
+                group relative overflow-hidden px-6 py-4 rounded-xl font-semibold transition-all duration-300 flex items-center gap-3 min-w-[140px] justify-center shadow-lg hover:shadow-2xl
+                ${
+                  action.disabled
+                    ? "bg-gray-700/50 text-gray-500 cursor-not-allowed"
+                    : `bg-gradient-to-r ${action.color} hover:scale-105 text-white`
+                }
+              `}
             >
-              {!action.disabled && (
-                <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-              )}
-              <span className="text-xl">{action.icon}</span>
-              <span className="relative z-10">{action.label}</span>
+              <span className="text-2xl">{action.icon}</span>
+              <span>{action.label}</span>
             </button>
           ))}
         </div>
 
-        {/* Refresh button */}
-        <button
-          onClick={onRefresh}
-          className="group relative overflow-hidden bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold px-8 py-4 rounded-xl transition-all duration-300 hover:scale-105 shadow-lg hover:shadow-2xl hover:shadow-red-500/40"
-        >
-          <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-          <span className="relative z-10 flex items-center gap-2">
-            <span>🔄</span>
-            Refresh Data
-          </span>
-        </button>
+        {/* 🔧 DODANO: Debug info u development mode */}
+        {process.env.NODE_ENV === "development" && (
+          <div className="mt-8 p-4 bg-gray-900/50 rounded-lg text-left text-sm text-gray-400">
+            <h4 className="text-white mb-2">Debug informacije:</h4>
+            <div>Selected Date: {selectedDate.toISOString()}</div>
+            <div>Date String: {selectedDate.toDateString()}</div>
+            <div>Is Today: {isToday().toString()}</div>
+          </div>
+        )}
 
-        {/* Additional info */}
-        <div className="mt-12 p-6 bg-gradient-to-r from-gray-800/40 via-gray-900/60 to-gray-800/40 backdrop-blur-sm rounded-2xl border border-gray-700/30 max-w-2xl mx-auto">
-          <h3 className="text-lg font-bold text-white mb-3">💡 Tip</h3>
-          <p className="text-gray-300 text-sm leading-relaxed">
-            Try selecting different dates or check back later. Match schedules
-            are updated regularly, and new fixtures may become available.
-          </p>
-        </div>
+        {/* Refresh button */}
+        {onRefresh && (
+          <button
+            onClick={() => {
+              console.log("🔄 Manual refresh clicked");
+              onRefresh();
+            }}
+            className="px-8 py-4 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold transition-all duration-300 shadow-lg hover:shadow-2xl hover:scale-105"
+          >
+            🔄 Osvježi podatke
+          </button>
+        )}
       </div>
     </div>
   );

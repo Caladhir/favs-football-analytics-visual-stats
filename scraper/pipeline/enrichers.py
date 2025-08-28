@@ -76,6 +76,15 @@ def enrich_event(browser: Any, event: Dict[str, Any], throttle: float = 0.0, *, 
         except Exception:
             pass
         return enriched
+    # --- Ensure we have the canonical event detail from the provider ---
+    try:
+        detail = browser.fetch_data(f"event/{eid}") or {}
+        detail_event = detail.get("event") if isinstance(detail, dict) and isinstance(detail.get("event"), dict) else detail
+        if isinstance(detail_event, dict):
+            # override base event snapshot with canonical detail so processors see authoritative fields
+            enriched["event"] = detail_event
+    except Exception:
+        pass
     def _fetch(path, key=None, default=None):
         try:
             data = browser.fetch_data(path) or default

@@ -16,6 +16,9 @@ import contextlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List
+import os
+import json
+import logging
 
 THIS = Path(__file__).resolve()
 SCRAPER_DIR = THIS.parents[1]
@@ -63,6 +66,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--throttle", type=float, default=0.0, help="Sleep seconds after each network call")
     p.add_argument("--dry-run", action="store_true", help="Do not persist – just log bundle sizes")
     p.add_argument("--max-events-per-day", type=int, help="Cap number of events per day (debug / speed)")
+    p.add_argument("--debug", action="store_true", help="Enable verbose debug traces for times and scores")
     p.add_argument("--tournaments", type=str, help="Comma-separated uniqueTournament IDs allowlist (overrides env)")
     return p.parse_args()
 
@@ -87,6 +91,23 @@ def resolve_range(args: argparse.Namespace) -> tuple[datetime, datetime]:
 def run_day(browser: Browser, processor: MatchProcessor, day: datetime, *, throttle: float, dry_run: bool, max_events: int | None):
     dstr = day.strftime('%Y-%m-%d')
     events = fetch_day(browser, day, throttle=throttle)
+    # Optional detailed debug of raw event time/score fields
+    if getattr(run_day, "_debug", False) and events:
+        logger.debug(f"[raw_events] day={dstr} count={len(events)}")
+        for ev in events:
+            try:
+                s_ts = ev.get("startTimestamp")
+                s_t = ev.get("startTime")
+                s_utc = ev.get("startTimeUTC")
+                st = (ev.get("status") or {})
+                hs = (ev.get("homeScore") or {}).get("current")
+                aw = (ev.get("awayScore") or {}).get("current")
+                cps = (ev.get("time") or {}).get("currentPeriodStartTimestamp")
+                logger.debug(
+                    f"[raw_event] id={ev.get('id')} startTimestamp={s_ts} startTime={s_t} startTimeUTC={s_utc} status_type={st.get('type')} status_desc={st.get('description')} homeScore={hs} awayScore={aw} cps={cps}"
+                )
+            except Exception:
+                pass
     if not events:
         logger.info(f"[day] {dstr} events=0")
         return {}
@@ -125,10 +146,42 @@ def run_day(browser: Browser, processor: MatchProcessor, day: datetime, *, throt
             enriched.append(enrich_event(browser, ev, throttle=throttle))
         except Exception as ex:  # keep going – log at debug granularity
             logger.debug(f"[enrich][skip] eid={ev.get('id')} err={ex}")
+    # Optional detailed debug of enriched events (post-enrich)
+    if getattr(run_day, "_debug", False) and enriched:
+        logger.debug(f"[enriched_events] day={dstr} count={len(enriched)}")
+        for en in enriched:
+            try:
+                base = en.get("event") or en
+                s_ts = base.get("startTimestamp")
+                s_t = base.get("startTime")
+                s_utc = base.get("startTimeUTC")
+                st = (base.get("status") or {})
+                hs = (base.get("homeScore") or {}).get("current")
+                aw = (base.get("awayScore") or {}).get("current")
+                cps = (base.get("time") or {}).get("currentPeriodStartTimestamp")
+                logger.debug(
+                    f"[enriched_event] id={base.get('id')} startTimestamp={s_ts} startTime={s_t} startTimeUTC={s_utc} status_type={st.get('type')} status_desc={st.get('description')} homeScore={hs} awayScore={aw} cps={cps}"
+                )
+            except Exception:
+                pass
     if not enriched:
         logger.info(f"[day] {dstr} enriched=0 (all failed)")
         return {}
     bundle = processor.process(enriched)
+    # Optional detailed debug of processed bundle match rows (post-process)
+    if getattr(run_day, "_debug", False) and bundle:
+        try:
+            mlist = bundle.get("matches", []) or []
+            logger.debug(f"[processed_matches] day={dstr} matches={len(mlist)}")
+            for m in mlist:
+                try:
+                    logger.debug(
+                        f"[proc_match] src_id={m.get('source_event_id')} start_time={m.get('start_time')} home_score={m.get('home_score')} away_score={m.get('away_score')} current_period_start={m.get('current_period_start')} status={m.get('status')}"
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
     standings_rows = build_standings(browser, enriched, throttle=throttle)
     if standings_rows:
         bundle["standings"] = standings_rows
@@ -162,6 +215,11 @@ def main():
     if allow_ids:
         logger.info(f"[allowlist] active uniqueTournament ids count={len(allow_ids)} sample={list(allow_ids)[:8]}")
         setattr(run_day, "_allow_ids", allow_ids)
+    # propagate debug flag to run_day so per-event debug traces emit when requested
+    try:
+        setattr(run_day, "_debug", bool(args.debug))
+    except Exception:
+        setattr(run_day, "_debug", False)
 
     browser = Browser()
     processor = MatchProcessor()

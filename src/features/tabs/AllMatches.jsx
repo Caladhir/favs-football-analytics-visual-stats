@@ -1,4 +1,4 @@
-// src/features/tabs/AllMatches.jsx - REDESIGNED WITH MODERN STYLING
+// src/features/tabs/AllMatches.jsx - POPRAVLJENA STRUKTURA (kao UpcomingMatches)
 import React, { useState, useMemo, useEffect } from "react";
 import { useAutoRefresh } from "../../hooks/useAutoRefresh";
 import { useAllMatches } from "../../hooks/useAllMatches";
@@ -20,7 +20,6 @@ import AllMatchesHeader from "../../features/all_matches/AllMatchesHeader";
 import MatchesGrid from "../../ui/MatchesGrid";
 import AllMatchesDebug from "../../features/all_matches/AllMatchesDebug";
 import EmptyAllMatches from "../../features/all_matches/EmptyAllMatches";
-import LoadingState from "../../ui/LoadingState";
 import ErrorState from "../../ui/ErrorState";
 
 // Import button components
@@ -28,7 +27,7 @@ import TimeSortButton, { applyTimeSort } from "../../ui/TimeSortButton";
 import GroupButton from "../../ui/GroupButton";
 import { RefreshButton } from "../../ui/SpecializedButtons";
 
-/* Dedupe logic */
+/* Dedupe logic - isti kao prije */
 const STATUS_RANK = {
   live: 4,
   inprogress: 4,
@@ -123,16 +122,10 @@ export default function AllMatches() {
 
   const [groupByCompetition, setGroupByCompetition] = useState(false);
   const [timeSortType, setTimeSortType] = useState("smart");
-  const [isLoaded, setIsLoaded] = useState(false);
 
   const userPreferences = useUserPreferences();
   const { matches, loading, backgroundRefreshing, handleAutoRefresh, error } =
     useAllMatches(selectedDate);
-
-  // Animation trigger
-  useEffect(() => {
-    setIsLoaded(true);
-  }, []);
 
   // 1) DEDUPE
   const dedupedMatches = useMemo(
@@ -250,51 +243,38 @@ export default function AllMatches() {
     );
   }
 
+  // 🔧 KLJUČNO: Jednostavna struktura kao UpcomingMatches - BEZ složenih animation wrapper-a
   return (
-    <div className="relative">
-      {/* Header */}
-      <div
-        className={`transition-all duration-700 ${
-          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-        }`}
-      >
-        <AllMatchesHeader
-          selectedDate={selectedDate}
-          setSelectedDate={setSelectedDate}
-          matchCount={sortedMatches.length}
-          backgroundRefreshing={backgroundRefreshing}
-          stats={stats}
-        />
-      </div>
+    <div className="min-h-screen  rounded-3xl p-1">
+      {/* Header - direktno bez animation wrapper-a */}
+      <AllMatchesHeader
+        selectedDate={selectedDate}
+        setSelectedDate={setSelectedDate}
+        matchCount={sortedMatches.length}
+        backgroundRefreshing={backgroundRefreshing}
+        stats={stats}
+      />
 
-      {/* Enhanced Controls */}
-      <div
-        className={`text-center mb-6 transition-all duration-700 delay-300 ${
-          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-        }`}
-      >
+      {/* Enhanced Controls - direktno bez animation wrapper-a */}
+      <div className="text-center mb-6">
         <div className="flex justify-center items-center gap-4">
           {/* Group toggle */}
-          <div className="relative">
-            <GroupButton
-              isGrouped={groupByCompetition}
-              onToggle={() => setGroupByCompetition((v) => !v)}
-              size="sm"
-              variant="modern"
-              className="bg-gradient-to-r from-gray-700/80 to-gray-800/80 backdrop-blur-sm border-gray-600/30 hover:from-red-600/80 hover:to-red-700/80 hover:border-red-500/40"
-            />
-          </div>
+          <GroupButton
+            isGrouped={groupByCompetition}
+            onToggle={() => setGroupByCompetition((v) => !v)}
+            size="sm"
+            variant="modern"
+            className="bg-gradient-to-r from-gray-700/80 to-gray-800/80 backdrop-blur-sm border-gray-600/30 hover:from-red-600/80 hover:to-red-700/80 hover:border-red-500/40"
+          />
 
           {/* Time sort */}
-          <div className="relative">
-            <TimeSortButton
-              value={timeSortType}
-              onChange={setTimeSortType}
-              size="sm"
-              variant="modern"
-              className="rounded-full bg-gradient-to-r from-gray-700/80 to-gray-800/80 backdrop-blur-sm border-gray-600/30 hover:from-blue-600/80 hover:to-blue-700/80 hover:border-blue-500/40"
-            />
-          </div>
+          <TimeSortButton
+            value={timeSortType}
+            onChange={setTimeSortType}
+            size="sm"
+            variant="modern"
+            className="rounded-full bg-gradient-to-r from-gray-700/80 to-gray-800/80 backdrop-blur-sm border-gray-600/30 hover:from-blue-600/80 hover:to-blue-700/80 hover:border-blue-500/40"
+          />
 
           {/* Background refresh indicator */}
           {backgroundRefreshing && (
@@ -316,26 +296,16 @@ export default function AllMatches() {
         )}
       </div>
 
-      {/* Matches Grid */}
-      <div
-        className={`transition-all duration-700 delay-500 ${
-          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-        }`}
-      >
-        <MatchesGrid
-          groupByCompetition={groupByCompetition}
-          groupedMatches={groupedMatches}
-          sortedMatches={sortedMatches}
-          showLiveIndicator={true}
-        />
-      </div>
+      {/* Matches Grid - direktno bez animation wrapper-a */}
+      <MatchesGrid
+        groupByCompetition={groupByCompetition}
+        groupedMatches={groupedMatches}
+        sortedMatches={sortedMatches}
+        showLiveIndicator={true}
+      />
 
-      {/* Enhanced Refresh Controls */}
-      <div
-        className={`flex justify-center items-center gap-4 mt-8 mb-4 transition-all duration-700 delay-600 ${
-          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-        }`}
-      >
+      {/* Enhanced Refresh Controls - direktno bez animation wrapper-a */}
+      <div className="flex justify-center items-center gap-4 mt-8 mb-4">
         <RefreshButton
           isLoading={backgroundRefreshing}
           onClick={handleAutoRefresh}
@@ -374,21 +344,6 @@ export default function AllMatches() {
               : "⏰←"}
           </span>
         </button>
-      </div>
-
-      {/* Debug info */}
-      <div
-        className={`transition-all duration-700 delay-700 ${
-          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-        }`}
-      >
-        <AllMatchesDebug
-          matches={matches}
-          sortedMatches={sortedMatches}
-          userPreferences={userPreferences}
-          backgroundRefreshing={backgroundRefreshing}
-          stats={stats}
-        />
       </div>
     </div>
   );

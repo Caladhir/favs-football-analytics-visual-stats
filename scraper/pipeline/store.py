@@ -323,15 +323,41 @@ def store_bundle(bundle: Dict[str, List[Dict[str, Any]]], browser=None, throttle
                             logger.debug(f"[store][match_state] recovered_mappings={recovered} from direct select")
                 except Exception as ex_fb:
                     logger.debug(f"[store][match_state] fallback select failed: {ex_fb}")
-            if ms_rows:
-                # Promote snapshot size to INFO for visibility
-                try:
-                    statuses = {r.get('status') for r in ms_rows}
-                    logger.info(f"[store][match_state] prepared rows={len(ms_rows)} distinct_statuses={len(statuses)} sample_statuses={list(statuses)[:5]}")
-                except Exception:
-                    pass
-                logger.debug(f"[store][match_state] upserting rows={len(ms_rows)} sample={ms_rows[:1]}")
-                counts["match_state"] = db.upsert_match_state(ms_rows)
+                if ms_rows:
+                    # Promote snapshot size to INFO for visibility
+                    try:
+                        statuses = {r.get('status') for r in ms_rows}
+                        logger.info(f"[store][match_state] prepared rows={len(ms_rows)} distinct_statuses={len(statuses)} sample_statuses={list(statuses)[:5]}")
+                    except Exception:
+                        pass
+                    logger.debug(f"[store][match_state] upserting rows={len(ms_rows)} sample={ms_rows[:1]}")
+                    counts["match_state"] = db.upsert_match_state(ms_rows)
+                    # === Reconcile: ensure canonical scores in `matches` reflect the snapshot ===
+                    try:
+                        client = getattr(db, 'client', None)
+                        if client:
+                            synced = 0
+                            for row in ms_rows:
+                                mid = row.get('match_id')
+                                if not mid:
+                                    continue
+                                try:
+                                    upd = {}
+                                    if row.get('home_score') is not None:
+                                        upd['home_score'] = row.get('home_score')
+                                    if row.get('away_score') is not None:
+                                        upd['away_score'] = row.get('away_score')
+                                    # keep updated_at consistent
+                                    if row.get('updated_at'):
+                                        upd['updated_at'] = row.get('updated_at')
+                                    if upd:
+                                        client.table('matches').update(upd).eq('id', mid).execute()
+                                        synced += 1
+                                except Exception as _ue:
+                                    logger.debug(f"[store][match_state_sync] failed update matches id={mid}: {_ue}")
+                            logger.info(f"[store][match_state_sync] synced={synced} rows to matches table")
+                    except Exception as _sync_ex:
+                        logger.debug(f"[store][match_state_sync] reconciliation failed: {_sync_ex}")
             else:
                 logger.info(f"[store][match_state] no rows built (match_map_size={len(match_map)} missing={len(missing_for_map)})")
         except Exception as ex_ms:

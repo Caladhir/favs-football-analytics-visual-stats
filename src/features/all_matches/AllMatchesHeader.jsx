@@ -9,7 +9,8 @@ export default function AllMatchesHeader({
   stats = null,
 }) {
   return (
-    <div className="relative">
+    <div className="relative" style={{ zIndex: 1001 }}>
+      {" "}
       {/* Status Badge */}
       <div className="flex justify-center pt-4 mb-2">
         <div className="bg-gradient-to-r from-gray-700/80 to-gray-800/80 backdrop-blur-sm text-white px-6 py-3 rounded-full text-sm font-bold shadow-lg border border-gray-600/30 flex items-center gap-3">
@@ -28,11 +29,11 @@ export default function AllMatchesHeader({
           )}
         </div>
       </div>
-
-      {/* Calendar Popover */}
-      <CalendarPopover date={selectedDate} setDate={setSelectedDate} />
-
-      {/* Match Statistics */}
+      <div className="relative" style={{ zIndex: 10000 }}>
+        {/* Calendar Popover */}
+        <CalendarPopover date={selectedDate} setDate={setSelectedDate} />
+        {/* Match Statistics */}
+      </div>
       {stats && (
         <div className="flex justify-center mt-4 mb-6">
           <div className="flex flex-wrap justify-center gap-3">
@@ -70,7 +71,6 @@ export default function AllMatchesHeader({
           </div>
         </div>
       )}
-
       {/* Background refresh indicator */}
       {backgroundRefreshing && (
         <div className="absolute top-2 right-2">

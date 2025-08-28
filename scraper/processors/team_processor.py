@@ -45,10 +45,20 @@ class TeamProcessor:
                             from datetime import datetime
                             founded = datetime.utcfromtimestamp(int(val)).year
                         else:
+                            # naive parse: take first 4 digits, but validate below
                             founded = int(str(val)[:4])  # naive parse
                         break
                     except Exception:
                         founded = None
+
+            # validate founded year (protect against values like -780, 0, or future years)
+            try:
+                from datetime import datetime as _dt
+                if founded is not None:
+                    if not (1800 <= int(founded) <= _dt.utcnow().year):
+                        founded = None
+            except Exception:
+                founded = None
             # Venue details
             venue_name = None
             venue_capacity = None

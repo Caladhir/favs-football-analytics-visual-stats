@@ -248,51 +248,6 @@ export default function Matches() {
       >
         <div className="max-w-7xl mx-auto">{renderActiveTab()}</div>
       </div>
-
-      {/* Debug Info - Development Only */}
-      {import.meta.env.DEV && (
-        <div className="fixed top-16 right-4 bg-black/80 backdrop-blur-sm text-white p-4 rounded-xl text-xs z-50 border border-red-500/30">
-          <div className="font-bold mb-2 text-red-400">🔴 Live Debug</div>
-          <div className="space-y-1">
-            <div>
-              Tab: <span className="text-blue-400">{tab}</span>
-            </div>
-            <div>
-              Live Count:{" "}
-              <span className="text-red-400">{liveMatchesCount}</span>
-            </div>
-            <div>
-              Loaded Tabs:{" "}
-              <span className="text-green-400">
-                {[...loadedTabs].join(", ")}
-              </span>
-            </div>
-            <div>
-              Time:{" "}
-              <span className="text-gray-400">
-                {new Date().toLocaleTimeString()}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CSS Animations */}
-      <style jsx>{`
-        @keyframes pulse-slow {
-          0%,
-          100% {
-            opacity: 1;
-          }
-          50% {
-            opacity: 0.8;
-          }
-        }
-
-        .animate-pulse-slow {
-          animation: pulse-slow 3s ease-in-out infinite;
-        }
-      `}</style>
     </main>
   );
 }

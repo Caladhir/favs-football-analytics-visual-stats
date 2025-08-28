@@ -230,6 +230,15 @@ def _clean_rows(table: str, rows: Iterable[Dict[str, Any]]) -> List[Dict[str, An
             # normalize blanks
             if isinstance(v, str) and not v.strip():
                 v = None
+            # Defensive: some teams payloads include 'founded' as a year (e.g. 1993)
+            # but the remote DB may expect a different type (timestamp/date). To
+            # avoid type errors on upsert, drop 'founded' here and keep any
+            # richer foundation info out of the teams upsert. If future work
+            # needs this field preserved, convert it to a safe integer/ISO
+            # date in the processor instead of sending raw strings.
+            if table == "teams" and k == "founded":
+                # skip adding 'founded' to cleaned payloads to avoid DB type mismatches
+                continue
             # table-specific normalizations
             if table == "matches":
                 # Ensure season is a simple string (name/year), not a whole object
@@ -372,6 +381,11 @@ class DatabaseClient:
         try:
             if isinstance(payload, dict):
                 payload = [payload]
+            # debug: log a small sample of payload to help diagnose type/format issues
+            try:
+                logger.debug(f"core.database | _upsert sample table={table} payload_sample={payload[:3]}")
+            except Exception:
+                logger.debug(f"core.database | _upsert sample table={table} payload_sample (unable to render)")
             if ignore_duplicates is None:
                 resp = self.client.table(table).upsert(payload, on_conflict=on_conflict).execute()
             else:
@@ -384,6 +398,10 @@ class DatabaseClient:
             return (n, max(0, len(payload) - n))
         except Exception as e:
             logger.exception(f"core.database | Upsert into {table} failed: {e}")
+            try:
+                logger.error(f"core.database | Upsert payload sample for {table}: {payload[:3]}")
+            except Exception:
+                logger.error(f"core.database | Upsert payload sample for {table}: (unprintable)")
             return (0, len(payload))
 
     # -------------------- lookup mapping helpers --------------------
@@ -571,6 +589,19 @@ class DatabaseClient:
                     tmp[k] = p
         payload = list(tmp.values())
 
+        # Treat placeholder names like "Player 123" as absent so they can be overwritten later.
+        def _is_placeholder(name: str | None) -> bool:
+            if not name:
+                return False
+            try:
+                import re
+                return bool(re.fullmatch(r"Player \d+", name.strip()))
+            except Exception:
+                return False
+        for p in payload:
+            if _is_placeholder(p.get("full_name")):
+                # Downgrade to lean by removing full_name so richer later row (with real name) can overwrite
+                p["full_name"] = None
         rich = [p for p in payload if p.get("full_name")]
         lean = [p for p in payload if not p.get("full_name")]
 
@@ -597,7 +628,7 @@ class DatabaseClient:
             sid = p.get("sofascore_id")
             if not sid:
                 continue
-            upd = {k: v for k, v in p.items() if k != "sofascore_id"}
+            upd = {k: v for k, v in p.items() if k != "sofascore_id" and not (k == "full_name" and v in (None, ""))}
             if not upd:
                 skipped += 1
                 continue
@@ -617,6 +648,8 @@ class DatabaseClient:
             f"core.database | players upsert: rich_ok={ok_rich} rich_fail={fail_rich} updated={updated} skipped={skipped} failed={failed}"
         )
         return (total_ok, total_fail)
+
+    # cumulative totals removed – players_with_totals view now source of truth
 
     def upsert_managers(self, rows: List[Dict[str, Any]]) -> tuple[int, int]:
         """
