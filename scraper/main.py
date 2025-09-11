@@ -1,4 +1,4 @@
-# scraper/main.py - Updated to work with refactored fetch_loop.py
+# scraper/main.py - 
 from __future__ import annotations
 import argparse
 import os

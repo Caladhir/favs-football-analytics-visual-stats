@@ -45,8 +45,6 @@ export default function App() {
             },
           }}
         />
-
-        {/* 🚀 PERFORMANCE DEBUGGER - samo u development */}
       </div>
     </Router>
   );

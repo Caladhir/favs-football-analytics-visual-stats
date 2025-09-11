@@ -61,7 +61,7 @@ function LiveStatusIndicator() {
     <div className="flex items-center justify-center mb-8">
       <div className="bg-gradient-to-r from-red-600 to-red-700 text-white px-6 py-3 rounded-full font-semibold text-sm flex items-center gap-3 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105">
         <div className="w-3 h-3 bg-white rounded-full animate-pulse" />
-        📊 Analytics Dashboard
+        Analytics Dashboard
         <div className="w-3 h-3 bg-white/70 rounded-full animate-ping" />
       </div>
     </div>

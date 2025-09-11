@@ -81,10 +81,13 @@ export default function LiveMatches() {
 
     if (timeSortType === "smart") {
       return sortMatches(input, userPreferences);
-    } else {
-      const timeSorted = applyTimeSort(input, timeSortType);
-      return sortMatches(timeSorted, userPreferences);
     }
+
+    // For explicit time sorts, honor chronological ordering.
+    // We still remove duplicates via sortMatches' dedupe helper by
+    // calling removeDuplicateMatches indirectly, but keep time ordering.
+    const timeSorted = applyTimeSort(input, timeSortType);
+    return timeSorted;
   }, [matches, timeSortType, userPreferences]);
 
   // Group matches if needed

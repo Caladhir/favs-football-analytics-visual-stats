@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import supabase from "../services/supabase";
 import { parseMatchISO } from "../utils/formatMatchTime";
+import { getValidLiveMatchesStrict } from "../utils/liveMatchFilters";
 
 const INTERVALS = {
   ultra: 2000, // >50 live
@@ -55,7 +56,8 @@ export function useLiveMatches() {
         .select(
           "id,home_team,away_team,home_score,away_score,minute,status,competition,updated_at,start_time"
         )
-        .in("status", ["live", "ht"]);
+        // include all common live-status variants from backend
+        .in("status", ["live", "ht", "inprogress", "halftime"]);
 
       if (!foreground) {
         query.gte("updated_at", fourMinAgo);
@@ -83,7 +85,10 @@ export function useLiveMatches() {
             return true;
           }
         });
-        setMatches(rowsFiltered);
+
+        // Apply unified live-match filter to ensure finished/stale matches are excluded
+        const valid = getValidLiveMatchesStrict(rowsFiltered);
+        setMatches(valid);
         setLastRefreshed(Date.now());
       }
     } catch (e) {
@@ -117,18 +122,29 @@ export function useLiveMatches() {
         (payload) => {
           const row = payload.new || payload.old || {};
           const st = String(row.status || "").toLowerCase();
-          // samo live/ht nas zanima
-          if (!["live", "ht"].includes(st)) return;
 
+          // Only proceed if the row might be a live variant -- detailed filtering below
+          if (!["live", "ht", "inprogress", "halftime"].includes(st)) return;
+
+          // merge candidate into current list, then re-run strict validation to avoid adding finished/stale matches
           lastRealtimeAtRef.current = Date.now();
           setIsRealtimeActive(true);
 
           setMatches((cur) => {
-            const idx = cur.findIndex((m) => m.id === row.id);
-            if (idx === -1) return [row, ...cur];
-            const next = [...cur];
-            next[idx] = { ...next[idx], ...row };
-            return next;
+            const merged = (() => {
+              const idx = cur.findIndex((m) => m.id === row.id);
+              if (idx === -1) return [row, ...cur];
+              const next = [...cur];
+              next[idx] = { ...next[idx], ...row };
+              return next;
+            })();
+
+            // Apply strict live filter to merged list to ensure finished/stale entries are removed
+            try {
+              return getValidLiveMatchesStrict(merged);
+            } catch {
+              return merged;
+            }
           });
         }
       )

@@ -33,7 +33,7 @@ class BrowserManager:
         stability = [
             "--disable-blink-features=AutomationControlled",
             "--disable-dev-shm-usage",
-            "--no-sandbox",
+            "--no-sandbox", 
             "--disable-gpu",
             "--mute-audio",
             "--log-level=3",

@@ -1,6 +1,7 @@
 // src/components/teams/StatsCards.jsx - RED THEME VERSION
 import React from "react";
 import FormIndicator from "./FormIndicator";
+import TeamLogo from "../../ui/TeamLogo";
 
 // Individual Stat Card Component
 function StatCard({
@@ -55,7 +56,7 @@ function StatCard({
           ) : (
             data.slice(0, 3).map((team, index) => (
               <div
-                key={team.id}
+                key={team.name}
                 className="flex items-center justify-between p-2 hover:bg-white/5 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-red-500/20"
                 onClick={() => handleTeamClick(team)}
               >
@@ -63,6 +64,11 @@ function StatCard({
                   <span className="text-gray-400 text-sm font-medium w-6">
                     #{index + 1}
                   </span>
+                  <TeamLogo
+                    src={team.logo_url}
+                    alt={`${team.name} logo`}
+                    className="w-6 h-6"
+                  />
                   <span className="text-white font-medium hover:text-red-400 transition-colors">
                     {team.name}
                   </span>

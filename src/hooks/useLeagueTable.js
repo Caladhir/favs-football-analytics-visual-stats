@@ -54,7 +54,9 @@ export function useLeagueTable(options = {}) {
       // Fetch matches
       const { data: matchesData, error: matchesError } = await supabase
         .from("matches")
-        .select("home_team,away_team,home_score,away_score,status,start_time")
+        .select(
+          "home_team,away_team,home_score,away_score,status,start_time,home_team_id,away_team_id"
+        )
         .gte("start_time", daysAgo.toISOString())
         .eq("status", "finished")
         .order("start_time", { ascending: false });
@@ -63,18 +65,25 @@ export function useLeagueTable(options = {}) {
       if (matchesError) throw matchesError;
 
       // Fetch teams for country/league info (if needed)
-      let teamsInfo = new Map();
+      let teamsById = new Map();
+      let teamsByName = new Map();
       if (groupByLeague || mode === "leaders" || mode === "stats") {
         const { data: teamsData } = await supabase
           .from("teams")
-          .select("name, country")
-          .limit(200);
+          .select("id, sofascore_id, name, country, logo_url")
+          .limit(2000);
 
         (teamsData || []).forEach((team) => {
-          teamsInfo.set(team.name, {
+          const info = {
+            id: team.id,
+            sofascore_id: team.sofascore_id,
+            name: team.name,
             country: team.country,
             league: detectLeague(team.country),
-          });
+            logo_url: team.logo_url || null,
+          };
+          teamsById.set(team.id, info);
+          teamsByName.set(team.name, info);
         });
       }
 
@@ -88,13 +97,18 @@ export function useLeagueTable(options = {}) {
 
         const updateTeamStats = (
           teamName,
+          teamId,
           points,
           scored,
           conceded,
           isHome
         ) => {
+          const info =
+            (teamId && teamsById.get(teamId)) ||
+            teamsByName.get(teamName) ||
+            {};
           const current = teamStats.get(teamName) || {
-            name: teamName,
+            name: info.name || teamName,
             points: 0,
             wins: 0,
             draws: 0,
@@ -102,8 +116,10 @@ export function useLeagueTable(options = {}) {
             goalsFor: 0,
             goalsAgainst: 0,
             games: 0,
-            country: teamsInfo.get(teamName)?.country || "Unknown",
-            league: teamsInfo.get(teamName)?.league || "Other",
+            id: info.id || teamId || null,
+            country: info.country || "Unknown",
+            league: info.league || "Other",
+            logo_url: info.logo_url || null,
           };
 
           teamStats.set(teamName, {
@@ -133,14 +149,56 @@ export function useLeagueTable(options = {}) {
 
         // Update stats for both teams
         if (homeScore === awayScore) {
-          updateTeamStats(match.home_team, 1, homeScore, awayScore, true);
-          updateTeamStats(match.away_team, 1, awayScore, homeScore, false);
+          updateTeamStats(
+            match.home_team,
+            match.home_team_id,
+            1,
+            homeScore,
+            awayScore,
+            true
+          );
+          updateTeamStats(
+            match.away_team,
+            match.away_team_id,
+            1,
+            awayScore,
+            homeScore,
+            false
+          );
         } else if (homeScore > awayScore) {
-          updateTeamStats(match.home_team, 3, homeScore, awayScore, true);
-          updateTeamStats(match.away_team, 0, awayScore, homeScore, false);
+          updateTeamStats(
+            match.home_team,
+            match.home_team_id,
+            3,
+            homeScore,
+            awayScore,
+            true
+          );
+          updateTeamStats(
+            match.away_team,
+            match.away_team_id,
+            0,
+            awayScore,
+            homeScore,
+            false
+          );
         } else {
-          updateTeamStats(match.home_team, 0, homeScore, awayScore, true);
-          updateTeamStats(match.away_team, 3, awayScore, homeScore, false);
+          updateTeamStats(
+            match.home_team,
+            match.home_team_id,
+            0,
+            homeScore,
+            awayScore,
+            true
+          );
+          updateTeamStats(
+            match.away_team,
+            match.away_team_id,
+            3,
+            awayScore,
+            homeScore,
+            false
+          );
         }
       });
 

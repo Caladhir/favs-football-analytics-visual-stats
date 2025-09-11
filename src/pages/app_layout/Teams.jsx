@@ -58,7 +58,7 @@ export default function Teams() {
               Football Teams
             </h1>
             <p className="text-xl md:text-2xl text-gray-300 font-light tracking-wider">
-              Pregled timova iz većih europskih liga i njihove statistike
+              Overview of teams from major European leagues and their statistics
             </p>
           </div>
 

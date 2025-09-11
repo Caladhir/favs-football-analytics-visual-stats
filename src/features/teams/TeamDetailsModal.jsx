@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from "react";
 import { Icon } from "@iconify-icon/react";
 import supabase from "../../services/supabase";
+import TeamLogo from "../../ui/TeamLogo";
 import FormIndicator from "./FormIndicator";
 
 export default function TeamDetailsModal({ team, isOpen, onClose }) {
@@ -40,15 +41,52 @@ export default function TeamDetailsModal({ team, isOpen, onClose }) {
         .order("start_time", { ascending: false })
         .limit(10);
 
-      // Fetch players (if team_id is available)
+      // Resolve team_id (leaders/stats objects don't include id)
+      let resolvedTeamId = team.id;
+      if (!resolvedTeamId) {
+        // Try resolve by known IDs in object (sofascore_id) first
+        if (team.sofascore_id) {
+          const { data: bySofa } = await supabase
+            .from("teams")
+            .select("id")
+            .eq("sofascore_id", team.sofascore_id)
+            .limit(1);
+          if (bySofa && bySofa.length > 0) {
+            resolvedTeamId = bySofa[0].id;
+          }
+        }
+        // Fallback by name
+        if (!resolvedTeamId && team.name) {
+          const { data: teamRows } = await supabase
+            .from("teams")
+            .select("id,name")
+            .eq("name", team.name)
+            .limit(1);
+          if (teamRows && teamRows.length > 0) {
+            resolvedTeamId = teamRows[0].id;
+          }
+        }
+      }
+
+      // Fetch players by resolved team_id
       let players = [];
-      if (team.id) {
-        const { data: playersData } = await supabase
+      if (resolvedTeamId) {
+        let { data: playersData } = await supabase
           .from("players")
           .select("*")
-          .eq("team_id", team.id)
+          .eq("team_id", resolvedTeamId)
           .order("number", { ascending: true })
-          .limit(25);
+          .limit(40);
+        // Backward compatibility: older rows may only have team_sofascore_id
+        if ((!playersData || playersData.length === 0) && team.sofascore_id) {
+          const { data: legacyPlayers } = await supabase
+            .from("players")
+            .select("*")
+            .eq("team_sofascore_id", team.sofascore_id)
+            .order("number", { ascending: true })
+            .limit(40);
+          playersData = legacyPlayers || [];
+        }
         players = playersData || [];
       }
 
@@ -86,12 +124,14 @@ export default function TeamDetailsModal({ team, isOpen, onClose }) {
       <div className="bg-gradient-to-br from-gray-900 via-gray-800 to-red-900 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden border border-red-500/30 shadow-2xl shadow-red-500/20">
         {/* Header */}
         <div className="relative p-6 border-b border-gray-700/50">
-          <div className="absolute -inset-0.5 bg-gradient-to-r from-red-500/20 to-white/10 rounded-t-2xl blur-sm opacity-50" />
-          <div className="relative flex items-center justify-between">
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-red-500/20 to-white/10 rounded-t-2xl blur-sm opacity-50 pointer-events-none z-0" />
+          <div className="relative z-10 flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="w-16 h-16 bg-gradient-to-br from-red-500/20 to-white/10 rounded-full flex items-center justify-center text-3xl">
-                ⚽
-              </div>
+              <TeamLogo
+                src={team?.logo_url}
+                alt={`${team?.name || "Team"} logo`}
+                className="w-16 h-16"
+              />
               <div>
                 <h2 className="text-2xl font-bold text-white">{team?.name}</h2>
                 <p className="text-gray-400">
@@ -108,7 +148,7 @@ export default function TeamDetailsModal({ team, isOpen, onClose }) {
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-4 mt-6">
+          <div className="relative z-10 flex gap-4 mt-6">
             {tabs.map((tab) => (
               <button
                 key={tab.id}

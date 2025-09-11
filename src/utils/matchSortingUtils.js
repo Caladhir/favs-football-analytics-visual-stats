@@ -188,7 +188,20 @@ export function getStatusPriority(status) {
   if (!status) return STATUS_PRIORITIES.upcoming;
 
   const normalizedStatus = status.toLowerCase().trim();
+  // Ensure finished-like statuses map to a low priority
+  if (
+    ["finished", "ft", "afterextra", "penalties"].includes(normalizedStatus)
+  ) {
+    return STATUS_PRIORITIES.finished || 50;
+  }
   return STATUS_PRIORITIES[normalizedStatus] || STATUS_PRIORITIES.upcoming;
+}
+
+// Utility for other modules: is this considered a live status?
+export function isLiveStatus(status) {
+  if (!status) return false;
+  const s = status.toLowerCase().trim();
+  return ["live", "ht", "inprogress", "halftime"].includes(s);
 }
 
 /**
