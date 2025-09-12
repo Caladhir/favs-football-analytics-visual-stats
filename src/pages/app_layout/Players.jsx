@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Search,
   Filter,
@@ -9,6 +9,7 @@ import {
   Database,
   Plus,
 } from "lucide-react";
+import CountrySelect from "../../ui/CountrySelect";
 import AnimatedBackground from "../../features/homepage/AnimatedBackground";
 import { usePlayersData } from "../../hooks/usePlayersData";
 import PlayerCard from "../../features/players/PlayerCard";
@@ -113,11 +114,16 @@ export default function Players() {
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [showPlayerModal, setShowPlayerModal] = useState(false);
 
-  // Filter states
-  const [searchQuery, setSearchQuery] = useState("");
+  // Filter & pagination states
+  const basePageSize = 200;
+  const [limit, setLimit] = useState(basePageSize);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState(""); // debounced value
   const [selectedPosition, setSelectedPosition] = useState("all");
   const [selectedLeague, setSelectedLeague] = useState("all");
-  const [sortBy, setSortBy] = useState("name");
+  const [sortBy, setSortBy] = useState("goals");
+  const [statsWindow, setStatsWindow] = useState(0); // 0=Season, 30, 7
+  const debounceRef = useRef(null);
 
   useEffect(() => {
     setIsLoaded(true);
@@ -135,25 +141,35 @@ export default function Players() {
     topScorers,
     topAssists,
     topRated,
+    seasonTopScorers,
+    seasonTopAssists,
+    seasonTopRated,
     isEmpty,
     hasData,
   } = usePlayersData({
-    limit: 100,
+    limit,
     position: selectedPosition,
     league: selectedLeague,
     sortBy,
     searchQuery,
     includeStats: true,
-    statsFrom: 30,
+    statsFrom: statsWindow,
   });
 
-  console.log("Players page state:", {
-    playersCount: players?.length || 0,
-    loading,
-    error,
-    isEmpty,
-    hasData,
-  });
+  // Debounce search input changes
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setSearchQuery(searchInput.trim());
+      setLimit(basePageSize);
+    }, 300);
+    return () => debounceRef.current && clearTimeout(debounceRef.current);
+  }, [searchInput]);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setLimit(basePageSize);
+  }, [selectedLeague, selectedPosition, sortBy, statsWindow]);
 
   // Position options based on your database data
   const positionOptions = [
@@ -162,10 +178,7 @@ export default function Players() {
   ];
 
   // League options based on your teams data
-  const leagueOptions = [
-    { id: "all", name: "All Leagues" },
-    ...leagues.map((league) => ({ id: league, name: league })),
-  ];
+  const leagueOptions = ["all", ...leagues];
 
   const handlePlayerClick = (player) => {
     console.log("Player clicked:", player.full_name);
@@ -240,7 +253,7 @@ export default function Players() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-red-950 text-white overflow-hidden relative">
+    <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-red-950 text-white relative">
       <AnimatedBackground />
 
       <div className="relative z-10">
@@ -279,94 +292,130 @@ export default function Players() {
         </section>
 
         {/* Top Players Section - Only show if we have data */}
-        {hasData &&
-          (topScorers.length > 0 ||
-            topAssists.length > 0 ||
-            topRated.length > 0) && (
-            <section
-              className={`max-w-6xl mx-auto px-4 mb-8 transition-all duration-700 delay-200 ${
-                isLoaded
-                  ? "opacity-100 translate-y-0"
-                  : "opacity-0 translate-y-8"
-              }`}
-            >
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                {/* Top Scorer */}
-                {topScorers[0] && (
-                  <div className="bg-white/5 backdrop-blur-sm rounded-lg p-4 border border-red-500/30">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <Target className="w-5 h-5 text-red-400" />
-                      <span className="text-sm font-semibold text-red-400">
-                        Top Scorer
-                      </span>
-                    </div>
+        {hasData && (
+          <section
+            className={`max-w-6xl mx-auto px-4 mb-8 transition-all duration-700 delay-200 ${
+              isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-end mb-4 gap-2 text-xs">
+              {[0, 30, 7].map((win) => (
+                <button
+                  key={win}
+                  onClick={() => setStatsWindow(win)}
+                  className={`px-3 py-1 rounded-full border transition-colors ${
+                    statsWindow === win
+                      ? "bg-red-500 text-white border-red-500"
+                      : "bg-white/5 text-gray-300 border-white/10 hover:bg-white/10"
+                  }`}
+                >
+                  {win === 0 ? "Season" : win + "d"}
+                </button>
+              ))}
+              <span className="ml-2 text-gray-400">
+                Stats window:{" "}
+                {statsWindow === 0 ? "Full Season" : statsWindow + " days"}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+              {/* Top Scorer */}
+              <div className="bg-white/5 backdrop-blur-sm rounded-lg p-4 border border-red-500/30">
+                <div className="flex items-center space-x-2 mb-2">
+                  <Target className="w-5 h-5 text-red-400" />
+                  <span className="text-sm font-semibold text-red-400">
+                    Top Scorer{" "}
+                    {statsWindow === 0 ? "" : `(last ${statsWindow}d)`}
+                  </span>
+                </div>
+                {(statsWindow === 0 ? seasonTopScorers : topScorers)[0] ? (
+                  <>
                     <div className="text-lg font-bold text-white">
-                      {topScorers[0].full_name}
+                      {
+                        (statsWindow === 0 ? seasonTopScorers : topScorers)[0]
+                          .full_name
+                      }
                     </div>
                     <div className="text-2xl font-black text-red-400">
-                      {topScorers[0].stats.goals} goals
+                      {statsWindow === 0
+                        ? seasonTopScorers[0].total_goals || 0
+                        : topScorers[0].stats.goals}{" "}
+                      goals
                     </div>
-                    {topScorers[0].teams && (
-                      <div className="text-sm text-gray-400">
-                        {topScorers[0].teams.name}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Top Assists */}
-                {topAssists[0] && (
-                  <div className="bg-white/5 backdrop-blur-sm rounded-lg p-4 border border-blue-500/30">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <TrendingUp className="w-5 h-5 text-blue-400" />
-                      <span className="text-sm font-semibold text-blue-400">
-                        Top Assists
-                      </span>
-                    </div>
-                    <div className="text-lg font-bold text-white">
-                      {topAssists[0].full_name}
-                    </div>
-                    <div className="text-2xl font-black text-blue-400">
-                      {topAssists[0].stats.assists} assists
-                    </div>
-                    {topAssists[0].teams && (
-                      <div className="text-sm text-gray-400">
-                        {topAssists[0].teams.name}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Top Rated */}
-                {topRated[0] && (
-                  <div className="bg-white/5 backdrop-blur-sm rounded-lg p-4 border border-yellow-500/30">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <Award className="w-5 h-5 text-yellow-400" />
-                      <span className="text-sm font-semibold text-yellow-400">
-                        Highest Rated
-                      </span>
-                    </div>
-                    <div className="text-lg font-bold text-white">
-                      {topRated[0].full_name}
-                    </div>
-                    <div className="text-2xl font-black text-yellow-400">
-                      {topRated[0].stats.rating} rating
-                    </div>
-                    {topRated[0].teams && (
-                      <div className="text-sm text-gray-400">
-                        {topRated[0].teams.name}
-                      </div>
-                    )}
+                  </>
+                ) : (
+                  <div className="text-sm text-gray-400 italic">
+                    No goals in this window
                   </div>
                 )}
               </div>
-            </section>
-          )}
+              {/* Top Assists */}
+              <div className="bg-white/5 backdrop-blur-sm rounded-lg p-4 border border-blue-500/30">
+                <div className="flex items-center space-x-2 mb-2">
+                  <TrendingUp className="w-5 h-5 text-blue-400" />
+                  <span className="text-sm font-semibold text-blue-400">
+                    Top Assists{" "}
+                    {statsWindow === 0 ? "" : `(last ${statsWindow}d)`}
+                  </span>
+                </div>
+                {(statsWindow === 0 ? seasonTopAssists : topAssists)[0] ? (
+                  <>
+                    <div className="text-lg font-bold text-white">
+                      {
+                        (statsWindow === 0 ? seasonTopAssists : topAssists)[0]
+                          .full_name
+                      }
+                    </div>
+                    <div className="text-2xl font-black text-blue-400">
+                      {statsWindow === 0
+                        ? seasonTopAssists[0].total_assists || 0
+                        : topAssists[0].stats.assists}{" "}
+                      assists
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-sm text-gray-400 italic">
+                    No assists in this window
+                  </div>
+                )}
+              </div>
+              {/* Highest Rated */}
+              <div className="bg-white/5 backdrop-blur-sm rounded-lg p-4 border border-yellow-500/30">
+                <div className="flex items-center space-x-2 mb-2">
+                  <Award className="w-5 h-5 text-yellow-400" />
+                  <span className="text-sm font-semibold text-yellow-400">
+                    Highest Rated{" "}
+                    {statsWindow === 0 ? "" : `(last ${statsWindow}d)`}
+                  </span>
+                </div>
+                {(statsWindow === 0 ? seasonTopRated : topRated)[0] ? (
+                  <>
+                    <div className="text-lg font-bold text-white">
+                      {
+                        (statsWindow === 0 ? seasonTopRated : topRated)[0]
+                          .full_name
+                      }
+                    </div>
+                    <div className="text-2xl font-black text-yellow-400">
+                      {statsWindow === 0
+                        ? seasonTopRated[0].avg_rating || 0
+                        : topRated[0].stats.rating}{" "}
+                      rating
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-sm text-gray-400 italic">
+                    No ratings in this window
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Filters - Only show if we have data */}
         {hasData && (
           <div
-            className={`max-w-6xl mx-auto px-4 mb-8 space-y-6 transition-all duration-700 delay-300 ${
+            className={`relative z-40 max-w-6xl mx-auto px-4 mb-8 space-y-6 transition-all duration-700 delay-300 ${
               isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
             }`}
           >
@@ -398,18 +447,11 @@ export default function Players() {
                 <h3 className="text-lg font-semibold text-white">
                   Country/League
                 </h3>
-                <div className="flex gap-2 flex-wrap">
-                  {leagueOptions.map((league) => (
-                    <PillButton
-                      key={league.id}
-                      active={selectedLeague === league.id}
-                      onClick={() => setSelectedLeague(league.id)}
-                      size="sm"
-                    >
-                      {league.name}
-                    </PillButton>
-                  ))}
-                </div>
+                <CountrySelect
+                  value={selectedLeague}
+                  options={leagueOptions}
+                  onChange={(val) => setSelectedLeague(val)}
+                />
               </div>
             )}
 
@@ -420,16 +462,16 @@ export default function Players() {
                 <input
                   type="text"
                   placeholder="Search players..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 rounded-lg bg-white/10 backdrop-blur-sm text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500/50 border border-white/20"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 rounded-lg bg-white/10 backdrop text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500/50 border border-white/20"
                 />
               </div>
 
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
-                className="px-4 py-3 rounded-lg bg-white/10 backdrop-blur-sm text-white focus:outline-none focus:ring-2 focus:ring-red-500/50 border border-white/20"
+                className="relative z-40 px-4 py-3 rounded-lg bg-white/10 backdrop-blur-sm text-white focus:outline-none focus:ring-2 focus:ring-red-500/50 border border-white/20 cursor-pointer"
               >
                 <option value="name" className="bg-gray-900">
                   Sort by Name
@@ -442,6 +484,18 @@ export default function Players() {
                 </option>
                 <option value="assists" className="bg-gray-900">
                   Sort by Assists
+                </option>
+                <option value="goalsPer90" className="bg-gray-900">
+                  Sort by Goals/90
+                </option>
+                <option value="assistsPer90" className="bg-gray-900">
+                  Sort by Assists/90
+                </option>
+                <option value="shotAccuracy" className="bg-gray-900">
+                  Sort by Shot Accuracy
+                </option>
+                <option value="minutes" className="bg-gray-900">
+                  Sort by Minutes Played
                 </option>
                 <option value="team" className="bg-gray-900">
                   Sort by Team
@@ -474,6 +528,7 @@ export default function Players() {
               </p>
               <button
                 onClick={() => {
+                  setSearchInput("");
                   setSearchQuery("");
                   setSelectedPosition("all");
                   setSelectedLeague("all");
@@ -504,7 +559,7 @@ export default function Players() {
               </div>
 
               {/* Players Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {players.map((player) => (
                   <PlayerCard
                     key={player.id}
@@ -513,6 +568,16 @@ export default function Players() {
                   />
                 ))}
               </div>
+              {players.length < total && (
+                <div className="flex justify-center mt-8">
+                  <button
+                    onClick={() => setLimit((l) => l + 150)}
+                    className="px-6 py-3 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-semibold transition-colors"
+                  >
+                    Load More ({players.length}/{total})
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>
