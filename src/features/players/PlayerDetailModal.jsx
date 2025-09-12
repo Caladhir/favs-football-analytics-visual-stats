@@ -308,13 +308,17 @@ const PlayerDetailModal = ({ player, onClose }) => {
                     {playerTeam.logo_url && (
                       <img
                         src={playerTeam.logo_url}
-                        alt={playerTeam.name || 'Team'}
+                        alt={playerTeam.name || "Team"}
                         className="w-5 h-5 object-contain rounded-sm border border-white/10 bg-white/5"
-                        onError={(e)=>{ e.currentTarget.style.display='none'; }}
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                        }}
                       />
                     )}
                     <span>
-                      {playerTeam.name || playerTeam.short_name || 'Unknown Team'}
+                      {playerTeam.name ||
+                        playerTeam.short_name ||
+                        "Unknown Team"}
                     </span>
                   </div>
                 )}
@@ -350,12 +354,18 @@ const PlayerDetailModal = ({ player, onClose }) => {
                 const rating = seasonStats.rating;
                 const style = getRatingStyle(rating);
                 return (
-                  <div className={`px-4 py-3 rounded-xl ${style.wrapper} min-w-[120px]`}> 
+                  <div
+                    className={`px-4 py-3 rounded-xl ${style.wrapper} min-w-[120px]`}
+                  >
                     <div className="text-center space-y-1">
-                      <div className={`text-2xl font-bold tabular-nums ${style.text}`}>
+                      <div
+                        className={`text-2xl font-bold tabular-nums ${style.text}`}
+                      >
                         {rating && rating > 0 ? rating.toFixed(1) : "—"}
                       </div>
-                      <div className={`text-[10px] tracking-wide uppercase font-semibold ${style.text}`}>
+                      <div
+                        className={`text-[10px] tracking-wide uppercase font-semibold ${style.text}`}
+                      >
                         {style.label}
                       </div>
                     </div>
