@@ -9,17 +9,18 @@ export function useQuickStats() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stats, setStats] = useState({
-    matchesToday: 0,          // ALL matches (any status) starting today (local day)
-    scheduledToday: 0,        // status === 'scheduled'
-    liveNowAll: 0,            // candidate live matches (status in LIVE set) ignoring staleness + age
-    liveNowStrict: 0,         // filtered by unified filter (age + staleness)
-    finishedToday: 0,         // status === 'finished'
+    matchesToday: 0, // ALL matches (any status) starting today (local day)
+    scheduledToday: 0, // status === 'scheduled'
+    liveNowAll: 0, // candidate live matches (status in LIVE set) ignoring staleness + age
+    liveNowStrict: 0, // filtered by unified filter (age + staleness)
+    finishedToday: 0, // status === 'finished'
     avgGoals7d: 0,
-    activePlayers7d: 0,       // kept for backward compat; now equals totalPlayers
+    activePlayers7d: 0, // kept for backward compat; now equals totalPlayers
     totalPlayers: 0,
-    coverage: {               // quick derived ratios
-      strictLiveAcceptance: 0 // liveNowStrict / liveNowAll
-    }
+    coverage: {
+      // quick derived ratios
+      strictLiveAcceptance: 0, // liveNowStrict / liveNowAll
+    },
   });
   const [meta, setMeta] = useState({
     fallbackUsed: false,
@@ -41,15 +42,21 @@ export function useQuickStats() {
       setLoading(true);
       setError(null);
 
-  const now = new Date();
-  // Use LOCAL day boundary because user expectation (more matches) likely based on local calendar day
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
-  // Rolling 7-day window (inclusive start) for aggregates (still uses absolute timestamps)
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const now = new Date();
+      // Use LOCAL day boundary because user expectation (more matches) likely based on local calendar day
+      const startOfDay = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate()
+      );
+      const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+      // Rolling 7-day window (inclusive start) for aggregates (still uses absolute timestamps)
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  // We expand the live candidate window slightly (startOfDay - 4h) to catch matches that started late last night but are still live after midnight.
-      const liveWindowStart = new Date(startOfDay.getTime() - 4 * 60 * 60 * 1000);
+      // We expand the live candidate window slightly (startOfDay - 4h) to catch matches that started late last night but are still live after midnight.
+      const liveWindowStart = new Date(
+        startOfDay.getTime() - 4 * 60 * 60 * 1000
+      );
 
       // Parallel queries for better performance.
       // 1. matchesToday: all matches any status (count)
@@ -64,39 +71,43 @@ export function useQuickStats() {
         finishedTodayResult,
         liveCandidatesData,
         finishedWeekMatchesResult,
-        playersCountResult
+        playersCountResult,
       ] = await Promise.all([
-        supabase.from("matches")
+        supabase
+          .from("matches")
           .select("id", { count: "exact", head: true })
           .gte("start_time", startOfDay.toISOString())
           .lt("start_time", endOfDay.toISOString()),
 
-        supabase.from("matches")
+        supabase
+          .from("matches")
           .select("id", { count: "exact", head: true })
           .eq("status", "scheduled")
           .gte("start_time", startOfDay.toISOString())
           .lt("start_time", endOfDay.toISOString()),
 
-        supabase.from("matches")
+        supabase
+          .from("matches")
           .select("id", { count: "exact", head: true })
           .eq("status", "finished")
           .gte("start_time", startOfDay.toISOString())
           .lt("start_time", endOfDay.toISOString()),
 
-        supabase.from("matches")
+        supabase
+          .from("matches")
           .select("id,start_time,updated_at,status,home_team,away_team")
-          .in("status", ["live","ht","inprogress","halftime"])
+          .in("status", ["live", "ht", "inprogress", "halftime"])
           .gte("start_time", liveWindowStart.toISOString())
           .lt("start_time", endOfDay.toISOString()),
 
-        supabase.from("matches")
+        supabase
+          .from("matches")
           .select("id,home_score,away_score")
           .gte("start_time", sevenDaysAgo.toISOString())
           .lte("start_time", now.toISOString())
           .eq("status", "finished"),
 
-        supabase.from("players")
-          .select('id', { count: 'exact', head: true }),
+        supabase.from("players").select("id", { count: "exact", head: true }),
       ]);
 
       if (!mountedRef.current) return;
@@ -107,7 +118,7 @@ export function useQuickStats() {
       const finishedToday = finishedTodayResult.count || 0;
 
       // Live candidate analysis
-      const liveCandidates = (liveCandidatesData.data || []);
+      const liveCandidates = liveCandidatesData.data || [];
       const liveNowAll = liveCandidates.length;
       // Apply strict filter (age + staleness)
       const strictlyValid = getValidLiveMatchesUnified(liveCandidates, {
@@ -117,21 +128,24 @@ export function useQuickStats() {
       });
       const liveNowStrict = strictlyValid.length;
       // Diagnostics: why rejected
-      let liveTooOld = 0, liveStale = 0;
+      let liveTooOld = 0,
+        liveStale = 0;
       const nowMs = Date.now();
-      liveCandidates.forEach(m => {
+      liveCandidates.forEach((m) => {
         const startTs = new Date(m.start_time).getTime();
         if (Number.isFinite(startTs)) {
           const hoursElapsed = (nowMs - startTs) / (1000 * 60 * 60);
           if (hoursElapsed > MAX_LIVE_AGE_HOURS) {
-            liveTooOld += 1; return;
+            liveTooOld += 1;
+            return;
           }
         }
         // staleness (skip if candidate would fail age first)
         if (m.updated_at) {
           const upd = new Date(m.updated_at).getTime();
-          if (Number.isFinite(upd) && (nowMs - upd) > LIVE_STALE_SEC * 1000) {
-            liveStale += 1; return;
+          if (Number.isFinite(upd) && nowMs - upd > LIVE_STALE_SEC * 1000) {
+            liveStale += 1;
+            return;
           }
         }
       });
@@ -141,7 +155,9 @@ export function useQuickStats() {
         (sum, match) => sum + (match.home_score || 0) + (match.away_score || 0),
         0
       );
-      const avgGoals = finishedWeekMatches.length ? totalGoals / finishedWeekMatches.length : 0;
+      const avgGoals = finishedWeekMatches.length
+        ? totalGoals / finishedWeekMatches.length
+        : 0;
 
       // Simplified: just total players count
       const totalPlayers = playersCountResult?.count || 0;
@@ -159,7 +175,7 @@ export function useQuickStats() {
         totalPlayers,
         coverage: {
           strictLiveAcceptance: Number(strictLiveAcceptance.toFixed(3)),
-        }
+        },
       };
       const playerStatsTableEmpty = true; // not used anymore but kept in meta for now
       const fallbackUsed = false;
@@ -172,7 +188,7 @@ export function useQuickStats() {
         liveTooOld,
         liveStale,
       });
-      console.debug('[useQuickStats] stats computed', computed, {
+      console.debug("[useQuickStats] stats computed", computed, {
         finishedWeekMatches: finishedWeekMatches.length,
         playerStatsTableEmpty,
         liveTooOld,

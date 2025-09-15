@@ -52,8 +52,8 @@ export function useUpsetAlert() {
         // There could be another match later with same diff; re-filter to choose latest among max diff
         const maxDiff = candidate._diff;
         const bestSame = matches
-          .filter(m => (m.away_score || 0) - (m.home_score || 0) === maxDiff)
-          .sort((a,b) => new Date(b.start_time) - new Date(a.start_time))[0];
+          .filter((m) => (m.away_score || 0) - (m.home_score || 0) === maxDiff)
+          .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))[0];
         candidate = { ...bestSame, _diff: maxDiff };
       }
       setUpset(candidate || matches[0] || null);

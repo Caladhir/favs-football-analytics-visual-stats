@@ -3,7 +3,10 @@
 // analyzeMatchStatus, findProblemMatches + legacy re-exports for live filters.
 
 import { DISPLAY_BACKEND_FRESH_SEC, LIVE_STALE_SEC } from "../services/live";
-export { getValidLiveMatches, getValidLiveMatchesStrict } from "./liveMatchFilters"; // legacy compatibility for old imports
+export {
+  getValidLiveMatches,
+  getValidLiveMatchesStrict,
+} from "./liveMatchFilters"; // legacy compatibility for old imports
 
 const LIVE_SET = new Set(["live", "ht", "inprogress", "halftime"]);
 
@@ -65,11 +68,14 @@ export function validateLiveStatus(match) {
   // Bridge upcoming -> live near kickoff if provider late updating status.
   if (!LIVE_SET.has(mapped)) {
     if (mapped === "upcoming") {
-      const start = parseStart(match.current_period_start || match.start_time).getTime();
+      const start = parseStart(
+        match.current_period_start || match.start_time
+      ).getTime();
       if (Number.isFinite(start)) {
         const diffMs = Date.now() - start; // negative => before kickoff
         const mins = Math.floor(diffMs / 60000);
-        if (diffMs > -2 * 60 * 1000 && diffMs < 120 * 60 * 1000) { // -2m .. +120m window
+        if (diffMs > -2 * 60 * 1000 && diffMs < 120 * 60 * 1000) {
+          // -2m .. +120m window
           if (mins >= 45 && mins <= 60) return "ht"; // halftime window based on elapsed
           return "live";
         }
@@ -79,7 +85,9 @@ export function validateLiveStatus(match) {
   }
 
   const now = Date.now();
-  const start = parseStart(match.current_period_start || match.start_time).getTime();
+  const start = parseStart(
+    match.current_period_start || match.start_time
+  ).getTime();
   if (Number.isFinite(start)) {
     const mins = Math.floor((now - start) / 60000);
     if (mapped === "live" && mins >= 45 && mins <= 60) return "ht"; // halftime conversion
@@ -99,7 +107,10 @@ export function hasValidBackendMinute(match) {
   );
 }
 
-export function isBackendMinuteFresh(match, maxAgeSeconds = DISPLAY_BACKEND_FRESH_SEC) {
+export function isBackendMinuteFresh(
+  match,
+  maxAgeSeconds = DISPLAY_BACKEND_FRESH_SEC
+) {
   if (!match?.updated_at) return false;
   const ts = new Date(match.updated_at).getTime();
   if (!Number.isFinite(ts)) return false;
@@ -130,21 +141,34 @@ export function calculateDisplayMinute(match) {
     value = formatMinute(match.minute);
   } else {
     const rt = calculateSimpleRealTime(match);
-    if (rt) value = rt; else if (hasValidBackendMinute(match)) value = formatMinute(match.minute); else value = "LIVE";
+    if (rt) value = rt;
+    else if (hasValidBackendMinute(match)) value = formatMinute(match.minute);
+    else value = "LIVE";
   }
 
   minuteCache.set(key, value);
   if (minuteCache.size > 120) {
-    for (const k of Array.from(minuteCache.keys()).slice(0, 40)) minuteCache.delete(k);
+    for (const k of Array.from(minuteCache.keys()).slice(0, 40))
+      minuteCache.delete(k);
   }
   if (import.meta.env?.DEV) {
     try {
       // Warn if scheduled_start_ts deviates strongly from parsed start_time
-      if (typeof match.scheduled_start_ts === 'number' && match.start_time) {
-        const schedMs = (match.scheduled_start_ts < 1e12 ? match.scheduled_start_ts * 1000 : match.scheduled_start_ts);
+      if (typeof match.scheduled_start_ts === "number" && match.start_time) {
+        const schedMs =
+          match.scheduled_start_ts < 1e12
+            ? match.scheduled_start_ts * 1000
+            : match.scheduled_start_ts;
         const start = parseStart(match.start_time)?.getTime();
         if (start && Math.abs(start - schedMs) > 20 * 60 * 1000) {
-          console.warn('[minuteCalc][start-drift]', match.id, 'scheduled_ts', new Date(schedMs).toISOString(), 'start_time', match.start_time);
+          console.warn(
+            "[minuteCalc][start-drift]",
+            match.id,
+            "scheduled_ts",
+            new Date(schedMs).toISOString(),
+            "start_time",
+            match.start_time
+          );
         }
       }
     } catch {}
@@ -158,17 +182,25 @@ const runtimeOffsets = new Map(); // match.id -> minutes integer
 function calculateSimpleRealTime(match) {
   try {
     const id = match.id || match.source_event_id;
-    const hasBackendMinute = hasValidBackendMinute(match) && isBackendMinuteFresh(match);
+    const hasBackendMinute =
+      hasValidBackendMinute(match) && isBackendMinuteFresh(match);
     // 1. Determine base scheduled start
     let baseStart = parseStart(match.start_time);
     // Heuristic: if scheduled_start_ts exists and differs by exactly +/-3600s (1h) from start_time, trust scheduled_start_ts instead
-    if (typeof match.scheduled_start_ts === 'number') {
+    if (typeof match.scheduled_start_ts === "number") {
       const sched = parseStart(match.scheduled_start_ts);
       if (sched && baseStart) {
         const delta = Math.abs(sched.getTime() - baseStart.getTime());
-        if (Math.abs(delta - 3600 * 1000) < 5000) { // within 5s of one hour diff
+        if (Math.abs(delta - 3600 * 1000) < 5000) {
+          // within 5s of one hour diff
           baseStart = sched;
-          if (import.meta.env?.DEV) console.warn('[time-fix][1h-shift-applied]', match.id, match.start_time, '-> scheduled_start_ts');
+          if (import.meta.env?.DEV)
+            console.warn(
+              "[time-fix][1h-shift-applied]",
+              match.id,
+              match.start_time,
+              "-> scheduled_start_ts"
+            );
         }
       } else if (sched && !baseStart) {
         baseStart = sched;
@@ -177,11 +209,13 @@ function calculateSimpleRealTime(match) {
     // 2. Use current_period_start if available (this is actual kickoff OR half restart)
     let cps = parseStart(match.current_period_start);
     // 3. If we have kickoff_offset_min from backend and NO cps yet, adjust baseStart
-    if (!cps && typeof match.kickoff_offset_min === 'number' && baseStart) {
-      baseStart = new Date(baseStart.getTime() + match.kickoff_offset_min * 60000);
+    if (!cps && typeof match.kickoff_offset_min === "number" && baseStart) {
+      baseStart = new Date(
+        baseStart.getTime() + match.kickoff_offset_min * 60000
+      );
     }
     // 4. If scheduled_start_ts present and start_time missing/invalid, fallback
-    if (!baseStart && typeof match.scheduled_start_ts === 'number') {
+    if (!baseStart && typeof match.scheduled_start_ts === "number") {
       baseStart = parseStart(match.scheduled_start_ts);
     }
     if (!baseStart) return null;
@@ -213,29 +247,44 @@ function calculateSimpleRealTime(match) {
     // Runtime drift correction using backend minute if large gap (once)
     if (id && hasBackendMinute) {
       const backendMin = match.minute;
-      if (typeof backendMin === 'number' && backendMin >= 1 && backendMin <= 120) {
+      if (
+        typeof backendMin === "number" &&
+        backendMin >= 1 &&
+        backendMin <= 120
+      ) {
         // Estimate our current displayed real-time minute (pre-correction) to compare
         let est;
         if (!secondHalfRestart) {
           est = Math.min(elapsedTotal, 90);
-          if (elapsedTotal > 45 && elapsedTotal <= 60) est = 45; // halftime freeze
-          else if (elapsedTotal > 60) est = Math.min(45 + (elapsedTotal - 60), 90);
+          if (elapsedTotal > 45 && elapsedTotal <= 60)
+            est = 45; // halftime freeze
+          else if (elapsedTotal > 60)
+            est = Math.min(45 + (elapsedTotal - 60), 90);
         } else {
-          const beforeRestart = Math.floor((secondHalfRestart.getTime() - kickoff.getTime()) / 60000);
-          const afterRestart = Math.floor((nowMs - secondHalfRestart.getTime()) / 60000);
-          if (afterRestart < 0) est = 45; else est = Math.min(45 + afterRestart, 90);
+          const beforeRestart = Math.floor(
+            (secondHalfRestart.getTime() - kickoff.getTime()) / 60000
+          );
+          const afterRestart = Math.floor(
+            (nowMs - secondHalfRestart.getTime()) / 60000
+          );
+          if (afterRestart < 0) est = 45;
+          else est = Math.min(45 + afterRestart, 90);
         }
         const diff = est - backendMin;
-        if (Math.abs(diff) >= 6 && Math.abs(diff) <= 30 && !runtimeOffsets.has(id)) {
+        if (
+          Math.abs(diff) >= 6 &&
+          Math.abs(diff) <= 30 &&
+          !runtimeOffsets.has(id)
+        ) {
           // apply negative diff as offset adjustment to kickoff
-            runtimeOffsets.set(id, -diff); // shift by diff minutes to align future calc
+          runtimeOffsets.set(id, -diff); // shift by diff minutes to align future calc
         }
       }
     }
 
     // Apply runtime offset if present and no cps second-half override
     const rtOffset = id ? runtimeOffsets.get(id) : null;
-    if (typeof rtOffset === 'number' && !secondHalfRestart) {
+    if (typeof rtOffset === "number" && !secondHalfRestart) {
       kickoff = new Date(kickoff.getTime() + rtOffset * 60000);
     }
 
@@ -253,8 +302,12 @@ function calculateSimpleRealTime(match) {
       return "90+";
     }
     // With explicit second-half restart timestamp
-    const beforeRestart = Math.floor((secondHalfRestart.getTime() - kickoff.getTime()) / 60000);
-    const afterRestart = Math.floor((nowMs - secondHalfRestart.getTime()) / 60000);
+    const beforeRestart = Math.floor(
+      (secondHalfRestart.getTime() - kickoff.getTime()) / 60000
+    );
+    const afterRestart = Math.floor(
+      (nowMs - secondHalfRestart.getTime()) / 60000
+    );
     // beforeRestart should be ~45-55; clamp to 45 baseline
     const base = beforeRestart >= 40 && beforeRestart <= 60 ? 45 : 45;
     if (afterRestart < 0) return `${base}'`;
@@ -266,14 +319,20 @@ function calculateSimpleRealTime(match) {
   }
 }
 
-export function calculateRealTimeMinute(match) { return calculateSimpleRealTime(match); }
+export function calculateRealTimeMinute(match) {
+  return calculateSimpleRealTime(match);
+}
 
 export function analyzeMatchStatus(match) {
   const now = Date.now();
   const start = new Date(match.start_time).getTime();
-  const hoursElapsed = Number.isFinite(start) ? ((now - start) / 36e5).toFixed(1) : "n/a";
+  const hoursElapsed = Number.isFinite(start)
+    ? ((now - start) / 36e5).toFixed(1)
+    : "n/a";
   const validatedStatus = validateLiveStatus(match);
-  const backendMinute = hasValidBackendMinute(match) ? `${match.minute}'` : null;
+  const backendMinute = hasValidBackendMinute(match)
+    ? `${match.minute}'`
+    : null;
   const backendFresh = isBackendMinuteFresh(match);
   const realtime = calculateSimpleRealTime(match);
   const display = calculateDisplayMinute(match);
@@ -281,7 +340,9 @@ export function analyzeMatchStatus(match) {
   if (backendMinute && realtime && /^\d+/.test(realtime)) {
     diff = Math.abs(parseInt(backendMinute, 10) - parseInt(realtime, 10));
   }
-  const isStale = match.updated_at && now - new Date(match.updated_at).getTime() > LIVE_STALE_SEC * 1000;
+  const isStale =
+    match.updated_at &&
+    now - new Date(match.updated_at).getTime() > LIVE_STALE_SEC * 1000;
   return {
     originalStatus: match.status || match.status_type,
     validatedStatus,
@@ -298,7 +359,9 @@ export function analyzeMatchStatus(match) {
       veryOld: Number(hoursElapsed) > 2,
       noValidMinute: !backendMinute && !realtime,
     },
-    statusChanged: (match.status || match.status_type || "").toLowerCase() !== validatedStatus,
+    statusChanged:
+      (match.status || match.status_type || "").toLowerCase() !==
+      validatedStatus,
   };
 }
 
@@ -306,13 +369,14 @@ export function findProblemMatches(matches, opts = {}) {
   const now = Date.now();
   const maxAgeHours = opts.maxAgeHours ?? 2;
   const staleCutoffMs = (opts.staleCutoffSec ?? LIVE_STALE_SEC) * 1000;
-  return (matches || []).filter(m => {
+  return (matches || []).filter((m) => {
     const s = normalizeStatus(m.status || m.status_type);
     if (s !== "live" && s !== "ht") return false;
     const start = new Date(m.start_time).getTime();
     const hoursElapsed = Number.isFinite(start) ? (now - start) / 36e5 : 0;
     const upd = m.updated_at ? new Date(m.updated_at).getTime() : NaN;
-    const isStale = s !== "ht" && Number.isFinite(upd) && now - upd > staleCutoffMs;
+    const isStale =
+      s !== "ht" && Number.isFinite(upd) && now - upd > staleCutoffMs;
     return hoursElapsed > maxAgeHours || isStale;
   });
 }
@@ -336,4 +400,3 @@ export function debugMinuteBreakdown(match) {
     display: calculateDisplayMinute(match),
   };
 }
-

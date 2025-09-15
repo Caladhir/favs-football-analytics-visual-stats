@@ -30,8 +30,10 @@ export function useAutoRefresh(
     // Dinamički intervali prema broju live utakmica (smanjeno opterećenje)
     let actualInterval;
     if (hasLive) {
-      if (liveMatches.length >= 100) actualInterval = Math.min(liveInterval, 8000);
-      else if (liveMatches.length >= 50) actualInterval = Math.min(liveInterval, 9000);
+      if (liveMatches.length >= 100)
+        actualInterval = Math.min(liveInterval, 8000);
+      else if (liveMatches.length >= 50)
+        actualInterval = Math.min(liveInterval, 9000);
       else if (liveMatches.length >= 20) actualInterval = liveInterval;
       else if (liveMatches.length >= 10) actualInterval = liveInterval;
       else actualInterval = liveInterval; // uvijek >= 10s sada

@@ -42,11 +42,13 @@ export default function MatchCard({ match }) {
   // 🔧 MEMOIZE time formatting (rijetko se mijenja)
   const timeInfo = useMemo(() => {
     // Original local formatting (legacy)
-  const base = formatMatchTime(match.start_time, match.scheduled_start_ts);
+    const base = formatMatchTime(match.start_time, match.scheduled_start_ts);
 
     // Detect naive timestamps (no Z / no +/-) which were actually UTC in source.
     const raw = (match.start_time || "").toString();
-    const isNaiveISO = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw) && !/[Zz]|[+\-]\d{2}:?\d{2}$/.test(raw);
+    const isNaiveISO =
+      /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw) &&
+      !/[Zz]|[+\-]\d{2}:?\d{2}$/.test(raw);
 
     // If naive, interpret as UTC then format in desired TZ (Europe/Zagreb) to avoid shift.
     let corrected = null;
@@ -54,9 +56,12 @@ export default function MatchCard({ match }) {
     if (isNaiveISO) {
       try {
         // Append 'Z' to force UTC interpretation.
-        const asUtc = new Date(raw + 'Z');
+        const asUtc = new Date(raw + "Z");
         if (!isNaN(asUtc.getTime())) {
-          const tzFmt = formatInTimezone(asUtc, { timeZone: 'Europe/Zagreb', locale: 'en-GB' });
+          const tzFmt = formatInTimezone(asUtc, {
+            timeZone: "Europe/Zagreb",
+            locale: "en-GB",
+          });
           corrected = {
             formattedDate: tzFmt.date,
             formattedTime: tzFmt.time,
@@ -70,7 +75,8 @@ export default function MatchCard({ match }) {
             browserLocalInterpretation: browserParse.toISOString(),
             forcedUtcInterpretation: asUtc.toISOString(),
             displayed: tzFmt.dateTime,
-            localOffsetMinutes: (browserParse.getTime() - asUtc.getTime()) / 60000,
+            localOffsetMinutes:
+              (browserParse.getTime() - asUtc.getTime()) / 60000,
           };
         }
       } catch (e) {
@@ -79,11 +85,14 @@ export default function MatchCard({ match }) {
     } else {
       // If already had timezone, just reformat explicitly in target TZ for consistency.
       try {
-        const tzFmt = formatInTimezone(match.start_time, { timeZone: 'Europe/Zagreb', locale: 'en-GB' });
+        const tzFmt = formatInTimezone(match.start_time, {
+          timeZone: "Europe/Zagreb",
+          locale: "en-GB",
+        });
         corrected = {
           formattedDate: tzFmt.date,
-            formattedTime: tzFmt.time,
-            dateTime: tzFmt.dateTime,
+          formattedTime: tzFmt.time,
+          dateTime: tzFmt.dateTime,
         };
         debugTZ = {
           raw,
@@ -103,7 +112,13 @@ export default function MatchCard({ match }) {
         const key = `tz-${match.id}-${debugTZ.raw}`;
         if (!window.__TZ_DBG.has(key)) {
           window.__TZ_DBG.add(key);
-          console.log("🕒 TZ-DIAG", match.home_team, "vs", match.away_team, debugTZ);
+          console.log(
+            "🕒 TZ-DIAG",
+            match.home_team,
+            "vs",
+            match.away_team,
+            debugTZ
+          );
         }
       } catch {}
     }
@@ -278,9 +293,9 @@ export default function MatchCard({ match }) {
             {import.meta.env.DEV && (
               <div className="text-[10px] opacity-70">
                 <div>raw: {String(match.start_time)}</div>
-                <div>cps: {String(match.current_period_start || '—')}</div>
+                <div>cps: {String(match.current_period_start || "—")}</div>
                 <div>tz: {timeInfo.formattedTime}</div>
-                {typeof window !== 'undefined' && window.__TZ_DBG && (
+                {typeof window !== "undefined" && window.__TZ_DBG && (
                   <div>
                     {/* Provide a lightweight hash indicator that diagnostics logged */}
                     tzdbg✓

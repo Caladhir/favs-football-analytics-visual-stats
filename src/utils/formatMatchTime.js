@@ -39,7 +39,11 @@ export function parseMatchISO(startTime) {
   return _parseToDate(startTime);
 }
 
-export function formatMatchTime(startTime, scheduledStartTs=null, driftThresholdMin=15) {
+export function formatMatchTime(
+  startTime,
+  scheduledStartTs = null,
+  driftThresholdMin = 15
+) {
   if (startTime == null && scheduledStartTs == null) {
     return { formattedDate: "Unknown Date", formattedTime: "Unknown Time" };
   }
@@ -48,11 +52,17 @@ export function formatMatchTime(startTime, scheduledStartTs=null, driftThreshold
   // Optional fallback: if scheduledStartTs exists and diff exceeds threshold, prefer scheduledStartTs.
   if (scheduledStartTs != null) {
     let schedDate = _parseToDate(scheduledStartTs * 1000 || scheduledStartTs); // if epoch seconds
-    if (!schedDate && typeof scheduledStartTs === 'number') {
-      try { schedDate = new Date((scheduledStartTs < 1e12 ? scheduledStartTs*1000 : scheduledStartTs)); } catch {}
+    if (!schedDate && typeof scheduledStartTs === "number") {
+      try {
+        schedDate = new Date(
+          scheduledStartTs < 1e12 ? scheduledStartTs * 1000 : scheduledStartTs
+        );
+      } catch {}
     }
     if (primaryDate && schedDate) {
-      const diffMin = Math.abs((primaryDate.getTime() - schedDate.getTime())/60000);
+      const diffMin = Math.abs(
+        (primaryDate.getTime() - schedDate.getTime()) / 60000
+      );
       if (diffMin > driftThresholdMin) {
         primaryDate = schedDate;
       }

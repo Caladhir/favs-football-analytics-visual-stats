@@ -90,7 +90,11 @@ function chooseBetter(a, b) {
   if (bScoreOk && !aScoreOk) return b;
 
   // If both have scores and differ, prefer the fresher updated_at; if timestamps equal, prefer higher total (likely newer)
-  if (aScoreOk && bScoreOk && (a.home_score !== b.home_score || a.away_score !== b.away_score)) {
+  if (
+    aScoreOk &&
+    bScoreOk &&
+    (a.home_score !== b.home_score || a.away_score !== b.away_score)
+  ) {
     if (ub > ua) return b;
     if (ua > ub) return a;
     const aTot = (a.home_score || 0) + (a.away_score || 0);
@@ -109,10 +113,24 @@ function chooseBetter(a, b) {
   if (sa === "sofascore" && sb !== "sofascore") return a;
 
   if (import.meta.env.DEV) {
-    if (aScoreOk && bScoreOk && (a.home_score !== b.home_score || a.away_score !== b.away_score)) {
+    if (
+      aScoreOk &&
+      bScoreOk &&
+      (a.home_score !== b.home_score || a.away_score !== b.away_score)
+    ) {
       console.warn("⚠️ Score discrepancy unresolved (same freshness)", {
-        a: { hs: a.home_score, as: a.away_score, updated_at: a.updated_at, source: a.source },
-        b: { hs: b.home_score, as: b.away_score, updated_at: b.updated_at, source: b.source },
+        a: {
+          hs: a.home_score,
+          as: a.away_score,
+          updated_at: a.updated_at,
+          source: a.source,
+        },
+        b: {
+          hs: b.home_score,
+          as: b.away_score,
+          updated_at: b.updated_at,
+          source: b.source,
+        },
       });
     }
   }
@@ -183,7 +201,9 @@ export default function AllMatches() {
     try {
       const { strict, relaxed, all } = compareFilters(sortedMatches);
       const missing = all.filter(
-        (m) => !strict.find((s) => s.id === m.id) && relaxed.find((r) => r.id === m.id)
+        (m) =>
+          !strict.find((s) => s.id === m.id) &&
+          relaxed.find((r) => r.id === m.id)
       );
       if (missing.length) {
         console.group("🔎 Potentially filtered live matches (stale/age)");

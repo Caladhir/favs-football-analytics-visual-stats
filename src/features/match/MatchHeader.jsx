@@ -80,7 +80,9 @@ export default function MatchHeader({ match, onRefresh, refreshing, scorers }) {
               className={`inline-flex items-center gap-1 px-2 py-1 rounded-full bg-zinc-800/70 ${
                 s.team === "home" ? "text-emerald-300" : "text-sky-300"
               }`}
-              title={`${s.player} ${s.isOwnGoal ? "(OG)" : s.isPenalty ? "(P)" : ""}`}
+              title={`${s.player} ${
+                s.isOwnGoal ? "(OG)" : s.isPenalty ? "(P)" : ""
+              }`}
             >
               <span className="font-medium max-w-[110px] truncate">
                 {s.player}

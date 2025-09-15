@@ -54,7 +54,10 @@ export function getValidLiveMatchesUnified(matches, options = {}) {
   const validMatches = matches.filter((match) => {
     // 1. Primijeni validateLiveStatus (koji sada može bridge-at upcoming -> live oko kick-offa)
     const computed = validateLiveStatus(match);
-    if (computed === "live" && normalizeStatus(match.status || match.status_type) === "upcoming") {
+    if (
+      computed === "live" &&
+      normalizeStatus(match.status || match.status_type) === "upcoming"
+    ) {
       bridged.push(match);
     }
     const isLiveStatus = LIVE_STATUSES.has(computed);
@@ -75,7 +78,9 @@ export function getValidLiveMatchesUnified(matches, options = {}) {
     return true;
   });
 
-  console.log(`✅ Valid live matches: ${validMatches.length}/${matches.length}`);
+  console.log(
+    `✅ Valid live matches: ${validMatches.length}/${matches.length}`
+  );
   if (bridged.length && import.meta.env.DEV) {
     console.log(
       `🕐 Kickoff-bridged matches (${bridged.length}):`,

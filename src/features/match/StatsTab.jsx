@@ -44,7 +44,11 @@ export default function StatsTab({ id, agg, richStats }) {
     ];
   }
 
-  const allZero = !rows.length || rows.every(r => (Number(r.home)||0)===0 && (Number(r.away)||0)===0);
+  const allZero =
+    !rows.length ||
+    rows.every(
+      (r) => (Number(r.home) || 0) === 0 && (Number(r.away) || 0) === 0
+    );
 
   return (
     <section id={id}>
@@ -103,7 +107,8 @@ export default function StatsTab({ id, agg, richStats }) {
       )}
       {richStats?.updated_at && (
         <p className="mt-3 text-xs text-zinc-500">
-          Team stats updated: {new Date(richStats.updated_at).toLocaleTimeString()}
+          Team stats updated:{" "}
+          {new Date(richStats.updated_at).toLocaleTimeString()}
         </p>
       )}
     </section>

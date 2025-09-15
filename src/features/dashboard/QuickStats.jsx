@@ -102,7 +102,9 @@ export default function QuickStats() {
       <div className="text-center mt-8">
         <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10">
           <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-          <span className="text-xs text-gray-400">Live data • Auto‑refresh</span>
+          <span className="text-xs text-gray-400">
+            Live data • Auto‑refresh
+          </span>
         </div>
       </div>
     </div>

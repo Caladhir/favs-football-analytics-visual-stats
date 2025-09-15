@@ -67,7 +67,8 @@ export default function useMatchData(matchId) {
             ["goal", "penalty_goal", "own_goal"].includes(e.event_type)
           )
           .sort(
-            (a, b) => (a.minute ?? 0) - (b.minute ?? 0) || a.id.localeCompare(b.id)
+            (a, b) =>
+              (a.minute ?? 0) - (b.minute ?? 0) || a.id.localeCompare(b.id)
           )
           .map((e) => ({
             id: e.id,
@@ -154,7 +155,7 @@ export default function useMatchData(matchId) {
           )
           .eq("match_id", matchId);
         if (emst) throw emst;
-        console.log('[useMatchData] match_stats rows', mst);
+        console.log("[useMatchData] match_stats rows", mst);
 
         // Map stats to home/away based on team_id (fallback by comparing goals/passes later if IDs missing)
         let statsHome = null;
@@ -184,10 +185,10 @@ export default function useMatchData(matchId) {
           )
           .eq("match_id", matchId);
         if (eps) throw eps;
-  console.log('[useMatchData] raw player_stats', ps);
-  // alias shots_total -> shots for backwards compatibility with existing aggregation logic
-  setPlayerStats((ps || []).map(r => ({ ...r, shots: r.shots_total })));
-        
+        console.log("[useMatchData] raw player_stats", ps);
+        // alias shots_total -> shots for backwards compatibility with existing aggregation logic
+        setPlayerStats((ps || []).map((r) => ({ ...r, shots: r.shots_total })));
+
         // 6) H2H – zadnjih 10 susreta po nazivima ekipa (dok ne povežemo team_id svugdje)
         const { data: h, error: eh } = await supabase
           .from("matches")
@@ -264,7 +265,8 @@ export default function useMatchData(matchId) {
   // Combined rich stats object for UI (prefers match_stats table, falls back to agg)
   const richStats = useMemo(() => {
     if (!teamStats) return null;
-    const normalizeNum = (v) => (v === null || v === undefined ? null : Number(v));
+    const normalizeNum = (v) =>
+      v === null || v === undefined ? null : Number(v);
     const pct = (v) => (v === null || v === undefined ? null : Number(v));
 
     const home = teamStats.home || {};
@@ -334,7 +336,8 @@ export default function useMatchData(matchId) {
         home: normalizeNum(home.saves),
         away: normalizeNum(away.saves),
       },
-      updated_at: teamStats.home?.updated_at || teamStats.away?.updated_at || null,
+      updated_at:
+        teamStats.home?.updated_at || teamStats.away?.updated_at || null,
     };
   }, [teamStats, agg]);
 
@@ -343,10 +346,10 @@ export default function useMatchData(matchId) {
     events,
     lineups,
     formations,
-  playerStats,
-  teamStats,
-  richStats,
-  scorers,
+    playerStats,
+    teamStats,
+    richStats,
+    scorers,
     h2h,
     agg,
     loading,

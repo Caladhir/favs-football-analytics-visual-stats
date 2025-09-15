@@ -14,7 +14,11 @@ import supabase from "../services/supabase";
 export function useFormGuide({ limit = 5 } = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [summary, setSummary] = useState({ periodDays: 30, generatedAt: null, teams: [] });
+  const [summary, setSummary] = useState({
+    periodDays: 30,
+    generatedAt: null,
+    teams: [],
+  });
   const mountedRef = useRef(true);
 
   const fetchFormGuide = useCallback(async () => {
@@ -29,7 +33,9 @@ export function useFormGuide({ limit = 5 } = {}) {
       // Fetch finished matches in the last 30 days with minimal fields.
       const { data: matches, error: matchesError } = await supabase
         .from("matches")
-        .select("id, start_time, home_team_id, away_team_id, home_score, away_score")
+        .select(
+          "id, start_time, home_team_id, away_team_id, home_score, away_score"
+        )
         .gte("start_time", since)
         .eq("status", "finished");
 
@@ -43,8 +49,10 @@ export function useFormGuide({ limit = 5 } = {}) {
       for (const m of safeMatches) {
         const homeId = m.home_team_id;
         const awayId = m.away_team_id;
-        if (!teamStats.has(homeId)) teamStats.set(homeId, { wins: 0, played: 0 });
-        if (!teamStats.has(awayId)) teamStats.set(awayId, { wins: 0, played: 0 });
+        if (!teamStats.has(homeId))
+          teamStats.set(homeId, { wins: 0, played: 0 });
+        if (!teamStats.has(awayId))
+          teamStats.set(awayId, { wins: 0, played: 0 });
 
         teamStats.get(homeId).played += 1;
         teamStats.get(awayId).played += 1;
@@ -60,7 +68,11 @@ export function useFormGuide({ limit = 5 } = {}) {
       }
 
       if (teamStats.size === 0) {
-        setSummary({ periodDays: 30, generatedAt: new Date().toISOString(), teams: [] });
+        setSummary({
+          periodDays: 30,
+          generatedAt: new Date().toISOString(),
+          teams: [],
+        });
         return;
       }
 
@@ -85,7 +97,9 @@ export function useFormGuide({ limit = 5 } = {}) {
       });
 
       const top = allTeamsStats.slice(0, limit);
-      const topIds = top.map(t => t.team_id).filter(id => id !== null && id !== undefined);
+      const topIds = top
+        .map((t) => t.team_id)
+        .filter((id) => id !== null && id !== undefined);
 
       let nameMap = new Map();
       if (topIds.length > 0) {
@@ -94,10 +108,10 @@ export function useFormGuide({ limit = 5 } = {}) {
           .select("id,name")
           .in("id", topIds);
         if (teamsError) throw teamsError;
-        nameMap = new Map((teamsData || []).map(t => [t.id, t.name]));
+        nameMap = new Map((teamsData || []).map((t) => [t.id, t.name]));
       }
 
-      const enriched = top.map(t => ({
+      const enriched = top.map((t) => ({
         ...t,
         name: nameMap.get(t.team_id) || `Team ${t.team_id}`,
       }));
