@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { formatMatchTime } from "../utils/formatMatchTime";
+import { formatInTimezone } from "../utils/formatInTimezone";
 import {
   validateLiveStatus,
   calculateDisplayMinute,
@@ -40,7 +41,74 @@ export default function MatchCard({ match }) {
 
   // 🔧 MEMOIZE time formatting (rijetko se mijenja)
   const timeInfo = useMemo(() => {
-    return formatMatchTime(match.start_time);
+    // Original local formatting (legacy)
+  const base = formatMatchTime(match.start_time, match.scheduled_start_ts);
+
+    // Detect naive timestamps (no Z / no +/-) which were actually UTC in source.
+    const raw = (match.start_time || "").toString();
+    const isNaiveISO = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw) && !/[Zz]|[+\-]\d{2}:?\d{2}$/.test(raw);
+
+    // If naive, interpret as UTC then format in desired TZ (Europe/Zagreb) to avoid shift.
+    let corrected = null;
+    let debugTZ = null; // extra diagnostic info
+    if (isNaiveISO) {
+      try {
+        // Append 'Z' to force UTC interpretation.
+        const asUtc = new Date(raw + 'Z');
+        if (!isNaN(asUtc.getTime())) {
+          const tzFmt = formatInTimezone(asUtc, { timeZone: 'Europe/Zagreb', locale: 'en-GB' });
+          corrected = {
+            formattedDate: tzFmt.date,
+            formattedTime: tzFmt.time,
+            dateTime: tzFmt.dateTime,
+          };
+          // Diagnostic: compare browser naive parse vs forced UTC parse
+          const browserParse = new Date(raw); // browser will treat as local time
+          debugTZ = {
+            raw,
+            naiveDetected: true,
+            browserLocalInterpretation: browserParse.toISOString(),
+            forcedUtcInterpretation: asUtc.toISOString(),
+            displayed: tzFmt.dateTime,
+            localOffsetMinutes: (browserParse.getTime() - asUtc.getTime()) / 60000,
+          };
+        }
+      } catch (e) {
+        // ignore
+      }
+    } else {
+      // If already had timezone, just reformat explicitly in target TZ for consistency.
+      try {
+        const tzFmt = formatInTimezone(match.start_time, { timeZone: 'Europe/Zagreb', locale: 'en-GB' });
+        corrected = {
+          formattedDate: tzFmt.date,
+            formattedTime: tzFmt.time,
+            dateTime: tzFmt.dateTime,
+        };
+        debugTZ = {
+          raw,
+          naiveDetected: false,
+          originalParse: new Date(match.start_time).toISOString(),
+          displayed: tzFmt.dateTime,
+        };
+      } catch (e) {
+        // fallback keep base
+      }
+    }
+
+    if (import.meta.env.DEV && debugTZ) {
+      // Log once per match id per mount
+      try {
+        if (!window.__TZ_DBG) window.__TZ_DBG = new Set();
+        const key = `tz-${match.id}-${debugTZ.raw}`;
+        if (!window.__TZ_DBG.has(key)) {
+          window.__TZ_DBG.add(key);
+          console.log("🕒 TZ-DIAG", match.home_team, "vs", match.away_team, debugTZ);
+        }
+      } catch {}
+    }
+
+    return corrected || base;
   }, [match.start_time]);
 
   // 🔧 MEMOIZE display minute calculation
@@ -97,7 +165,7 @@ export default function MatchCard({ match }) {
     if (statusInfo.isPostponed) return "ODGOĐENO";
     if (statusInfo.isAbandoned) return "PREKID";
     if (statusInfo.isSuspended) return "PAUZA";
-    if (statusInfo.isUpcoming) return timeInfo.formattedTime;
+    if (statusInfo.isUpcoming) return timeInfo.formattedTime; // kickoff time
     return match.status || "N/A";
   }, [statusInfo, displayMinute, timeInfo.formattedTime, match.status]);
 
@@ -205,6 +273,19 @@ export default function MatchCard({ match }) {
               <div className="flex items-center space-x-1">
                 <span>📍</span>
                 <span className="truncate max-w-32">{match.venue}</span>
+              </div>
+            )}
+            {import.meta.env.DEV && (
+              <div className="text-[10px] opacity-70">
+                <div>raw: {String(match.start_time)}</div>
+                <div>cps: {String(match.current_period_start || '—')}</div>
+                <div>tz: {timeInfo.formattedTime}</div>
+                {typeof window !== 'undefined' && window.__TZ_DBG && (
+                  <div>
+                    {/* Provide a lightweight hash indicator that diagnostics logged */}
+                    tzdbg✓
+                  </div>
+                )}
               </div>
             )}
             {debugInfo}

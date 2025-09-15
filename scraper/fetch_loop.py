@@ -39,7 +39,25 @@ class FetchLoop:
                 logger.info("📭 No events to process")
                 return {"success": True, "processed": 0, "stored": 0, "duration": time.time() - start}
 
-            enriched = await self._enrich_phase(raw_events)
+            # NEW: light snapshot store (minimal matches) BEFORE heavy enrichment
+            # This gives the dashboard quick access to today's matches count without waiting
+            # for all detail endpoints (lineups, incidents, stats, etc.). Controlled by env var
+            # FAST_SNAPSHOT (default on).
+            if os.getenv("FAST_SNAPSHOT", "1").lower() in {"1","true","yes"}:
+                try:
+                    snap_ok = await self._light_snapshot_store(raw_events)
+                    logger.info(f"⚡ Light snapshot stored {snap_ok} minimal matches early")
+                except Exception as sx:
+                    logger.warning(f"⚠️ Light snapshot phase failed: {sx}")
+
+            # After snapshot we may want to trim for heavy enrichment cost
+            max_enrich = int(os.getenv("ENRICH_MAX_EVENTS", str(self.max_events))) if os.getenv("ENRICH_MAX_EVENTS") else self.max_events
+            events_for_enrich = list(raw_events)
+            if len(events_for_enrich) > max_enrich:
+                events_for_enrich = events_for_enrich[:max_enrich]
+                logger.info(f"⚡ Enrichment limited to {max_enrich} events (snapshot stored full set)")
+
+            enriched = await self._enrich_phase(events_for_enrich)
             bundle = self._processing_phase(enriched)
             results = await self._storage_phase(bundle)
 
@@ -81,15 +99,148 @@ class FetchLoop:
             sched = self._safe_fetch(f"scheduled-events/{today}")
             out += _take_events(sched)
 
-            if len(out) > self.max_events:
-                out = out[: self.max_events]
-                logger.info(f"⚡ Limited to {self.max_events} events")
+            # Do NOT trim here anymore; trimming is now only for enrichment (after snapshot) unless explicitly forced.
+            if os.getenv("FORCE_FETCH_TRIM"):
+                limit = int(os.getenv("FORCE_FETCH_TRIM", str(self.max_events)))
+                if len(out) > limit:
+                    out = out[:limit]
+                    logger.info(f"⚡ Force-trimmed raw fetch to {limit} events (FORCE_FETCH_TRIM)")
 
-            logger.info(f"📦 Fetched {len(out)} raw events")
+            # Basic breakdown BEFORE any trimming (current code no longer trims here unless FORCE_FETCH_TRIM)
+            try:
+                live_ct = 0; sched_ct = 0; other_ct = 0
+                for ev in out:
+                    st_obj = ev.get("status") or {}
+                    st_type = (st_obj.get("type") or st_obj.get("description") or ev.get("statusType") or "").lower()
+                    if st_type in {"notstarted","not_started","ns","scheduled"}:
+                        sched_ct += 1
+                    elif st_type in {"live","inprogress","in_progress","ht","halftime"}:
+                        live_ct += 1
+                    else:
+                        other_ct += 1
+                logger.info(f"📦 Fetched {len(out)} raw events (live={live_ct} scheduled={sched_ct} other={other_ct})")
+            except Exception:
+                logger.info(f"📦 Fetched {len(out)} raw events (breakdown error)")
             return out
         except Exception as e:
             logger.error(f"❌ Fetch failed: {e}")
             return []
+
+    async def _light_snapshot_store(self, raw_events: List[Dict[str, Any]]) -> int:
+        """Store minimal match rows immediately (fast path).
+
+        We purposely avoid hitting any extra endpoints here; we only use the raw snapshot
+        payloads returned by `events/live` and `scheduled-events/{date}`. This keeps latency
+        low so the frontend can show today's match count quickly.
+
+        Fields populated: home_team, away_team, start_time, status, competition, source, source_event_id.
+        """
+        if not raw_events:
+            return 0
+        minimal: List[Dict[str, Any]] = []
+        scheduled_only = os.getenv("SNAPSHOT_SCHEDULED_ONLY", "0").lower() in {"1","true","yes"}
+        total_events = len(raw_events)
+        scheduled_ids: set[int] = set()
+        live_ids: set[int] = set()
+        league_counter: Dict[str, int] = {}
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for ev in raw_events:
+            try:
+                # Event ID
+                ev_id = None
+                for k in ("id","eventId","sofaEventId"):
+                    if ev.get(k) is not None:
+                        try:
+                            ev_id = int(ev[k])
+                            break
+                        except Exception:
+                            pass
+                if ev_id is None:
+                    continue
+                # Basic team names
+                ht = (ev.get("homeTeam") or {}).get("name") or (ev.get("home") or {}).get("name")
+                at = (ev.get("awayTeam") or {}).get("name") or (ev.get("away") or {}).get("name")
+                if not ht or not at:
+                    continue  # skip incomplete rows
+                # Competition / tournament
+                comp = (ev.get("tournament") or {}).get("name") or (ev.get("competition") or {}).get("name")
+                # Start time (timestamp variants)
+                ts_val = ev.get("startTimeUTC") or ev.get("startTime") or ev.get("startTimestamp")
+                start_iso = None
+                if ts_val is not None:
+                    try:
+                        if isinstance(ts_val, (int,float)):
+                            if ts_val > 10**12:
+                                ts_val = ts_val/1000.0
+                            start_iso = datetime.utcfromtimestamp(ts_val).replace(tzinfo=timezone.utc).isoformat()
+                        elif isinstance(ts_val, str):
+                            # Try ISO parse; fallback numeric string -> epoch
+                            try:
+                                start_iso = datetime.fromisoformat(ts_val.replace("Z","+00:00")).astimezone(timezone.utc).isoformat()
+                            except Exception:
+                                if ts_val.isdigit():
+                                    ts = int(ts_val)
+                                    if ts > 10**12:
+                                        ts = ts/1000.0
+                                    start_iso = datetime.utcfromtimestamp(ts).replace(tzinfo=timezone.utc).isoformat()
+                    except Exception:
+                        start_iso = None
+                status_obj = ev.get("status") or {}
+                status_type = status_obj.get("type") or status_obj.get("description") or ev.get("statusType") or "scheduled"
+                status_type = str(status_type).lower()
+                # Map SofaScore style statuses to our canonical ones lightly
+                if status_type in {"notstarted","not_started","ns"}:
+                    status_type = "scheduled"
+                if status_type == "scheduled":
+                    scheduled_ids.add(ev_id)
+                elif status_type in {"live","inprogress","in_progress","ht","halftime"}:
+                    live_ids.add(ev_id)
+                if comp:
+                    league_counter[comp] = league_counter.get(comp, 0) + 1
+                if scheduled_only and status_type != "scheduled":
+                    continue  # skip non-scheduled in scheduled-only mode
+                row = {
+                    "home_team": ht,
+                    "away_team": at,
+                    "start_time": start_iso,
+                    "status": status_type,
+                    "competition": comp,
+                    "source": "sofascore",
+                    "source_event_id": ev_id,
+                    "updated_at": now_iso,
+                }
+                # If live snapshot already has scores include them
+                try:
+                    hs = (ev.get("homeScore") or {}).get("current")
+                    as_ = (ev.get("awayScore") or {}).get("current")
+                    if hs is not None and as_ is not None:
+                        row["home_score"] = hs
+                        row["away_score"] = as_
+                except Exception:
+                    pass
+                minimal.append(row)
+            except Exception:
+                continue
+        if not minimal:
+            return 0
+        try:
+            ok, fail = db.batch_upsert_matches(minimal)
+            if scheduled_only:
+                logger.info(
+                    f"⚡ Light snapshot (scheduled-only) raw_total={total_events} scheduled_unique={len(scheduled_ids)} live_unique={len(live_ids)} stored={ok} fail={fail}"
+                )
+            else:
+                logger.info(
+                    f"⚡ Light snapshot (all) raw_total={total_events} scheduled_unique={len(scheduled_ids)} live_unique={len(live_ids)} stored={ok} fail={fail}"
+                )
+            # optional compact league listing (top 8)
+            if league_counter:
+                top_leagues = sorted(league_counter.items(), key=lambda x: x[1], reverse=True)[:8]
+                logger.info("🏆 snapshot league sample: " + ", ".join(f"{n}:{c}" for n,c in top_leagues))
+            return ok
+        except Exception as e:
+            logger.warning(f"⚠️ Light snapshot upsert failed: {e}")
+            return 0
 
     async def _enrich_phase(self, raw_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         logger.info(f"🔍 Phase 2: Enriching {len(raw_events)} events...")
@@ -306,6 +457,8 @@ class FetchLoop:
                         r["match_id"] = match_map[tup]
                     if (ps := r.get("player_sofascore_id")) in player_map:
                         r["player_id"] = player_map[ps]
+                    if (ts := r.get("team_sofascore_id")) in team_map:
+                        r["team_id"] = team_map[ts]
                 ok, fail = db.upsert_player_stats(pstats)
                 res["player_stats"] = {"ok": ok, "fail": fail}; total += ok
                 logger.info(f"✅ player_stats: ok={ok}, fail={fail}")
@@ -317,6 +470,8 @@ class FetchLoop:
                     tup = (r.get("source"), r.get("source_event_id"))
                     if tup in match_map:
                         r["match_id"] = match_map[tup]
+                    if (ts := r.get("team_sofascore_id")) in team_map:
+                        r["team_id"] = team_map[ts]
                 ok, fail = db.upsert_match_stats(mstats)
                 res["match_stats"] = {"ok": ok, "fail": fail}; total += ok
                 logger.info(f"✅ match_stats:  ok={ok}, fail={fail}")

@@ -114,7 +114,7 @@ export default function Dashboard() {
               Analytics Dashboard
             </h1>
             <p className="text-xl md:text-2xl text-gray-300 font-light tracking-wider">
-              Pregled ključnih metrika, trendova i live podataka
+              Overview of key metrics, trends & live data
             </p>
           </div>
           <LiveStatusIndicator />
@@ -129,8 +129,8 @@ export default function Dashboard() {
           {/* Insights Section - EQUAL HEIGHTS */}
           <section>
             <SectionHeader
-              title="Trenutni Insights"
-              subtitle="Najažurniji podaci o performansama i trending statistike"
+              title="Current Insights"
+              subtitle="Fresh performance data & trending statistics"
               icon="🔥"
             />
             <div
@@ -152,8 +152,8 @@ export default function Dashboard() {
           {/* Live Data Section - EQUAL HEIGHTS */}
           <section>
             <SectionHeader
-              title="Live Praćenje"
-              subtitle="Utakmice u tijeku i top performeri"
+              title="Live Tracking"
+              subtitle="Matches in progress & top performers"
               icon="⚡"
             />
             <div
@@ -173,7 +173,7 @@ export default function Dashboard() {
           <section>
             <SectionHeader
               title="Performance Analytics"
-              subtitle="Dubinska analiza rezultata i očekivanih performansi"
+              subtitle="In-depth analysis of results & expected performance"
               icon="📈"
             />
             <div
@@ -192,8 +192,8 @@ export default function Dashboard() {
           {/* Advanced Analytics - EQUAL HEIGHTS */}
           <section>
             <SectionHeader
-              title="Napredne Analize"
-              subtitle="Detaljni pregled performansi i aktivnosti kroz vrijeme"
+              title="Advanced Analytics"
+              subtitle="Detailed view of performance & activity over time"
               icon="🎯"
             />
             <div

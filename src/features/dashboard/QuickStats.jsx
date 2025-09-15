@@ -37,7 +37,7 @@ function StatCard({ title, value, sub, delay = 0 }) {
 }
 
 export default function QuickStats() {
-  const { stats, loading, error } = useQuickStats();
+  const { stats, loading, error, meta } = useQuickStats();
 
   if (loading) {
     return (
@@ -72,32 +72,29 @@ export default function QuickStats() {
       {/* Header */}
       <div className="text-center mb-8">
         <h2 className="text-3xl font-bold bg-gradient-to-r from-white via-red-200 to-white bg-clip-text text-transparent mb-2">
-          Ključne Statistike
+          Key Statistics
         </h2>
         <p className="text-gray-400 text-sm">
-          Pregled trenutnih performansi i aktivnosti
+          Snapshot of recent performance & activity
         </p>
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         <StatCard
-          title="Utakmice Danas"
-          value={stats.matchesToday}
-          sub="zakazane za danas"
-          delay={100}
+          title="Matches Today"
+          value={stats.matchesToday ?? 0}
+          delay={80}
         />
         <StatCard
-          title="Prosjek Golova (7d)"
-          value={stats.avgGoals7d}
-          sub="po utakmici"
-          delay={200}
+          title="Avg Goals (7d)"
+          value={(stats.avgGoals7d ?? 0).toFixed(2)}
+          delay={160}
         />
         <StatCard
-          title="Aktivni Igrači (7d)"
-          value={`${stats.activePlayers7d}+`}
-          sub="različitih igrača"
-          delay={300}
+          title="Players Total"
+          value={stats.totalPlayers ?? stats.activePlayers7d ?? 0}
+          delay={240}
         />
       </div>
 
@@ -105,9 +102,7 @@ export default function QuickStats() {
       <div className="text-center mt-8">
         <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10">
           <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-          <span className="text-xs text-gray-400">
-            Live data • Auto-refresh
-          </span>
+          <span className="text-xs text-gray-400">Live data • Auto‑refresh</span>
         </div>
       </div>
     </div>

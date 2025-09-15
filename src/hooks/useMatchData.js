@@ -9,10 +9,12 @@ export default function useMatchData(matchId) {
   const [lineups, setLineups] = useState({ home: [], away: [] });
   const [formations, setFormations] = useState({ home: null, away: null });
   const [playerStats, setPlayerStats] = useState([]);
+  const [teamStats, setTeamStats] = useState(null); // enriched aggregate from match_stats
   const [h2h, setH2h] = useState([]);
   const [loading, setLoading] = useState(true);
   const [bgRefreshing, setBgRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [scorers, setScorers] = useState([]); // ordered goal scorers enriched
 
   const fetchMatch = useCallback(
     async (isBg = false) => {
@@ -57,7 +59,26 @@ export default function useMatchData(matchId) {
           .eq("match_id", matchId)
           .order("minute", { ascending: true });
         if (eev) throw eev;
-        setEvents(ev || []);
+        const eventsArr = ev || [];
+        setEvents(eventsArr);
+        // Derive scorers list (goal, penalty_goal, own_goal, penalty, own goal nuance)
+        const goalEvents = eventsArr
+          .filter((e) =>
+            ["goal", "penalty_goal", "own_goal"].includes(e.event_type)
+          )
+          .sort(
+            (a, b) => (a.minute ?? 0) - (b.minute ?? 0) || a.id.localeCompare(b.id)
+          )
+          .map((e) => ({
+            id: e.id,
+            minute: e.minute,
+            player: e.player_name || "Unknown",
+            team: e.team, // 'home' | 'away'
+            type: e.event_type,
+            isOwnGoal: e.event_type === "own_goal",
+            isPenalty: e.event_type === "penalty_goal", // separate flag
+          }));
+        setScorers(goalEvents);
 
         // 3) LINEUPS
         const { data: lu, error: elu } = await supabase
@@ -65,7 +86,7 @@ export default function useMatchData(matchId) {
           .select(
             `
           id, match_id, team_id, player_id, position, jersey_number, is_starting, is_captain,
-          players:player_id(id, full_name, position, number, nationality, age)
+          players:player_id(id, full_name, position, number, nationality, date_of_birth)
         `
           )
           .eq("match_id", matchId);
@@ -125,22 +146,49 @@ export default function useMatchData(matchId) {
         }
         setFormations(fObj);
 
-        // 4) PLAYER STATS
+        // 4) MATCH STATS (team level: possession, shots, corners ... )
+        const { data: mst, error: emst } = await supabase
+          .from("match_stats")
+          .select(
+            `match_id, team_id, possession, shots_total, shots_on_target, corners, fouls, offsides, yellow_cards, red_cards, passes, pass_accuracy, xg, saves, updated_at`
+          )
+          .eq("match_id", matchId);
+        if (emst) throw emst;
+        console.log('[useMatchData] match_stats rows', mst);
+
+        // Map stats to home/away based on team_id (fallback by comparing goals/passes later if IDs missing)
+        let statsHome = null;
+        let statsAway = null;
+        if (mst && mst.length) {
+          if (m?.home_team_id && m?.away_team_id) {
+            statsHome = mst.find((s) => s.team_id === m.home_team_id) || null;
+            statsAway = mst.find((s) => s.team_id === m.away_team_id) || null;
+          } else if (mst.length === 2) {
+            // no team ids -> just assign deterministically
+            statsHome = mst[0];
+            statsAway = mst[1];
+          }
+        }
+        setTeamStats({ home: statsHome, away: statsAway });
+
+        // 5) PLAYER STATS
         const { data: ps, error: eps } = await supabase
           .from("player_stats")
           .select(
             `
           id, match_id, player_id, team_id,
-          goals, assists, shots, passes, tackles, minutes_played, rating,
+          goals, assists, shots_total, shots_on_target, passes, tackles, minutes_played, rating, touches,
           players:player_id(id, full_name, position, number),
           teams:team_id(id, name)
         `
           )
           .eq("match_id", matchId);
         if (eps) throw eps;
-        setPlayerStats(ps || []);
-
-        // 5) H2H – zadnjih 10 susreta po nazivima ekipa (dok ne povežemo team_id svugdje)
+  console.log('[useMatchData] raw player_stats', ps);
+  // alias shots_total -> shots for backwards compatibility with existing aggregation logic
+  setPlayerStats((ps || []).map(r => ({ ...r, shots: r.shots_total })));
+        
+        // 6) H2H – zadnjih 10 susreta po nazivima ekipa (dok ne povežemo team_id svugdje)
         const { data: h, error: eh } = await supabase
           .from("matches")
           .select(
@@ -213,12 +261,92 @@ export default function useMatchData(matchId) {
     };
   }, [playerStats, match, homeName, awayName]);
 
+  // Combined rich stats object for UI (prefers match_stats table, falls back to agg)
+  const richStats = useMemo(() => {
+    if (!teamStats) return null;
+    const normalizeNum = (v) => (v === null || v === undefined ? null : Number(v));
+    const pct = (v) => (v === null || v === undefined ? null : Number(v));
+
+    const home = teamStats.home || {};
+    const away = teamStats.away || {};
+
+    return {
+      possession: {
+        label: "Possession",
+        home: pct(home.possession),
+        away: pct(away.possession),
+        type: "percent",
+      },
+      shots_total: {
+        label: "Shots",
+        home: normalizeNum(home.shots_total) ?? agg.home.shots,
+        away: normalizeNum(away.shots_total) ?? agg.away.shots,
+      },
+      shots_on_target: {
+        label: "Shots on Target",
+        home: normalizeNum(home.shots_on_target),
+        away: normalizeNum(away.shots_on_target),
+      },
+      corners: {
+        label: "Corners",
+        home: normalizeNum(home.corners),
+        away: normalizeNum(away.corners),
+      },
+      fouls: {
+        label: "Fouls",
+        home: normalizeNum(home.fouls),
+        away: normalizeNum(away.fouls),
+      },
+      offsides: {
+        label: "Offsides",
+        home: normalizeNum(home.offsides),
+        away: normalizeNum(away.offsides),
+      },
+      yellow_cards: {
+        label: "Yellow Cards",
+        home: normalizeNum(home.yellow_cards),
+        away: normalizeNum(away.yellow_cards),
+      },
+      red_cards: {
+        label: "Red Cards",
+        home: normalizeNum(home.red_cards),
+        away: normalizeNum(away.red_cards),
+      },
+      passes: {
+        label: "Passes",
+        home: normalizeNum(home.passes) ?? agg.home.passes,
+        away: normalizeNum(away.passes) ?? agg.away.passes,
+      },
+      pass_accuracy: {
+        label: "Pass Accuracy",
+        home: pct(home.pass_accuracy),
+        away: pct(away.pass_accuracy),
+        type: "percent",
+      },
+      xg: {
+        label: "xG",
+        home: normalizeNum(home.xg),
+        away: normalizeNum(away.xg),
+        precision: 2,
+      },
+      saves: {
+        label: "Saves",
+        home: normalizeNum(home.saves),
+        away: normalizeNum(away.saves),
+      },
+      updated_at: teamStats.home?.updated_at || teamStats.away?.updated_at || null,
+    };
+  }, [teamStats, agg]);
+
   return {
     match,
     events,
     lineups,
     formations,
-    playerStats,
+  playerStats,
+  teamStats,
+  richStats,
+  scorers,
     h2h,
     agg,
     loading,

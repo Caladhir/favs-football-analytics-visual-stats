@@ -23,6 +23,8 @@ export default function MatchPage() {
     bgRefreshing,
     error,
     refetch,
+    scorers,
+    richStats,
   } = useMatchData(id);
 
   if (loading) {
@@ -81,6 +83,7 @@ export default function MatchPage() {
           match={match}
           onRefresh={refetch}
           refreshing={bgRefreshing}
+          scorers={scorers}
         />
 
         <MatchTabs>
@@ -92,7 +95,7 @@ export default function MatchPage() {
             homeName={match.home_team}
             awayName={match.away_team}
           />
-          <StatsTab id="Stats" agg={agg} />
+          <StatsTab id="Stats" agg={agg} richStats={richStats} />
           <H2HTab id="H2H" h2h={h2h} />
           <PredictionBox id="Prediction" match={match} h2h={h2h} />
         </MatchTabs>

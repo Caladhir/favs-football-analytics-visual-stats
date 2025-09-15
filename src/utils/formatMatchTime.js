@@ -39,22 +39,38 @@ export function parseMatchISO(startTime) {
   return _parseToDate(startTime);
 }
 
-export function formatMatchTime(startTime) {
-  if (startTime == null) {
+export function formatMatchTime(startTime, scheduledStartTs=null, driftThresholdMin=15) {
+  if (startTime == null && scheduledStartTs == null) {
     return { formattedDate: "Unknown Date", formattedTime: "Unknown Time" };
   }
 
-  const d = _parseToDate(startTime);
-  if (!d || isNaN(d.getTime())) {
+  let primaryDate = _parseToDate(startTime);
+  // Optional fallback: if scheduledStartTs exists and diff exceeds threshold, prefer scheduledStartTs.
+  if (scheduledStartTs != null) {
+    let schedDate = _parseToDate(scheduledStartTs * 1000 || scheduledStartTs); // if epoch seconds
+    if (!schedDate && typeof scheduledStartTs === 'number') {
+      try { schedDate = new Date((scheduledStartTs < 1e12 ? scheduledStartTs*1000 : scheduledStartTs)); } catch {}
+    }
+    if (primaryDate && schedDate) {
+      const diffMin = Math.abs((primaryDate.getTime() - schedDate.getTime())/60000);
+      if (diffMin > driftThresholdMin) {
+        primaryDate = schedDate;
+      }
+    } else if (!primaryDate && schedDate) {
+      primaryDate = schedDate;
+    }
+  }
+
+  if (!primaryDate || isNaN(primaryDate.getTime())) {
     return { formattedDate: "Invalid Date", formattedTime: "Invalid Time" };
   }
   return {
-    formattedDate: d.toLocaleDateString("hr-HR", {
+    formattedDate: primaryDate.toLocaleDateString("hr-HR", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
     }),
-    formattedTime: d.toLocaleTimeString("hr-HR", {
+    formattedTime: primaryDate.toLocaleTimeString("hr-HR", {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,

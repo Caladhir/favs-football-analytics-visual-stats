@@ -8,8 +8,8 @@ import { getValidLiveMatches } from "../utils/liveMatchFilters";
 export function useAutoRefresh(
   matches = [],
   refreshCallback,
-  liveInterval = 2000, // 🔧 ULTRA BRZO: 2s base za live
-  idleInterval = 30000 // Idle ostaje 30s
+  liveInterval = 10000, // Slower default: 10s
+  idleInterval = 60000 // Idle: 60s
 ) {
   const intervalRef = useRef(null);
   const callbackRef = useRef(refreshCallback);
@@ -27,41 +27,33 @@ export function useAutoRefresh(
     const liveMatches = getValidLiveMatches(matches);
     const hasLive = liveMatches.length > 0;
 
-    // 🚀 ULTRA AGRESIVNI INTERVALI based on live count
+    // Dinamički intervali prema broju live utakmica (smanjeno opterećenje)
     let actualInterval;
     if (hasLive) {
-      if (liveMatches.length >= 100) {
-        actualInterval = 1500; // 1.5s za 100+ live utakmica - ULTRA FAST
-      } else if (liveMatches.length >= 50) {
-        actualInterval = 2000; // 2s za 50+ live utakmica
-      } else if (liveMatches.length >= 20) {
-        actualInterval = 2500; // 2.5s za 20+ live utakmica
-      } else if (liveMatches.length >= 10) {
-        actualInterval = 3000; // 3s za 10+ live utakmica
-      } else {
-        actualInterval = liveInterval; // 2s za malo live utakmica
-      }
+      if (liveMatches.length >= 100) actualInterval = Math.min(liveInterval, 8000);
+      else if (liveMatches.length >= 50) actualInterval = Math.min(liveInterval, 9000);
+      else if (liveMatches.length >= 20) actualInterval = liveInterval;
+      else if (liveMatches.length >= 10) actualInterval = liveInterval;
+      else actualInterval = liveInterval; // uvijek >= 10s sada
     } else {
       actualInterval = idleInterval; // 30s kad nema live
     }
 
     if (hasLive) {
       console.log(
-        `🚀 ULTRA-REFRESH enabled: ${liveMatches.length} live matches (every ${
+        `♻️ Auto-refresh: ${liveMatches.length} live matches (interval ${(
           actualInterval / 1000
-        }s)`
+        ).toFixed(1)}s)`
       );
 
       intervalRef.current = setInterval(() => {
-        console.log(
-          `🚀 Ultra-refreshing ${liveMatches.length} live matches...`
-        );
+        console.log(`Refreshing live matches (${liveMatches.length})...`);
         if (callbackRef.current) {
           callbackRef.current();
         }
       }, actualInterval);
     } else {
-      console.log("✅ No live matches - auto-refresh disabled");
+      console.log("✅ No live matches - auto-refresh idle");
     }
 
     return () => {

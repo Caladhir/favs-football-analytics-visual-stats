@@ -32,12 +32,31 @@ export function useUpsetAlert() {
 
       if (fetchError) throw fetchError;
 
-      // Find upset: away team wins by 2+ goals
-      const upsetMatch = (data || []).find(
-        (match) => (match.away_score || 0) - (match.home_score || 0) >= 2
-      );
-
-      setUpset(upsetMatch || (data && data[0]) || null);
+      // New logic: find BIGGEST away win with goal difference > 3 (strict >3)
+      // Priority: higher diff first, then most recent start_time.
+      // Fallback: if none diff>3, show latest finished match (data[0]).
+      const matches = data || [];
+      let candidate = null;
+      for (const m of matches) {
+        const diff = (m.away_score || 0) - (m.home_score || 0);
+        if (diff > 3) {
+          if (!candidate) {
+            candidate = { ...m, _diff: diff };
+          } else if (diff > candidate._diff) {
+            candidate = { ...m, _diff: diff };
+          }
+        }
+      }
+      // If multiple share same diff but earlier loop keeps earliest with that diff, refine by recency
+      if (candidate) {
+        // There could be another match later with same diff; re-filter to choose latest among max diff
+        const maxDiff = candidate._diff;
+        const bestSame = matches
+          .filter(m => (m.away_score || 0) - (m.home_score || 0) === maxDiff)
+          .sort((a,b) => new Date(b.start_time) - new Date(a.start_time))[0];
+        candidate = { ...bestSame, _diff: maxDiff };
+      }
+      setUpset(candidate || matches[0] || null);
     } catch (err) {
       if (!mountedRef.current) return;
       console.error("Error fetching upset alert:", err);

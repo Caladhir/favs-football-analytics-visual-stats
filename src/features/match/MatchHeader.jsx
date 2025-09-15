@@ -5,7 +5,7 @@ import {
   calculateDisplayMinute,
 } from "../../utils/matchStatusUtils";
 
-export default function MatchHeader({ match, onRefresh, refreshing }) {
+export default function MatchHeader({ match, onRefresh, refreshing, scorers }) {
   if (!match) return null;
 
   const { formattedDate, formattedTime } = formatMatchTime(match.start_time);
@@ -71,7 +71,29 @@ export default function MatchHeader({ match, onRefresh, refreshing }) {
         </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-center gap-3">
+      {/* Scorers bar */}
+      {Array.isArray(scorers) && scorers.length > 0 && (
+        <div className="mt-4 rounded-xl border border-white/10 bg-zinc-900/50 p-3 text-xs text-zinc-300 flex flex-wrap gap-3 justify-center">
+          {scorers.map((s) => (
+            <span
+              key={s.id}
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full bg-zinc-800/70 ${
+                s.team === "home" ? "text-emerald-300" : "text-sky-300"
+              }`}
+              title={`${s.player} ${s.isOwnGoal ? "(OG)" : s.isPenalty ? "(P)" : ""}`}
+            >
+              <span className="font-medium max-w-[110px] truncate">
+                {s.player}
+              </span>
+              <span className="text-zinc-400">{s.minute || "?"}'</span>
+              {s.isPenalty && <span className="text-amber-400">(P)</span>}
+              {s.isOwnGoal && <span className="text-red-400">(OG)</span>}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-4 flex items-center justify-center gap-3">
         <button
           onClick={onRefresh}
           className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-700"

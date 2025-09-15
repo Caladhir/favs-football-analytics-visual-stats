@@ -120,8 +120,10 @@ class StatsProcessor:
                 return None
         return None
 
-    def process_match_stats(self, raw: Dict[str, Any], event_id: int) -> List[Dict[str, Any]]:
-        """Parse team‑level match statistics into DB‑friendly rows."""
+    def process_match_stats(self, raw: Dict[str, Any], event_id: int, home_team_sofa: Optional[int] = None, away_team_sofa: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Parse team‑level match statistics into DB‑friendly rows.
+        Added home_team_sofa / away_team_sofa to carry provider team ids forward so that later storage phase can map them to team UUIDs.
+        """
         out: List[Dict[str, Any]] = []
         # SofaScore current structure: { statistics: [ { period: "ALL", groups: [ { statisticsItems: [...] } ] }, ... ] }
         periods = raw.get("statistics") or []
@@ -192,6 +194,11 @@ class StatsProcessor:
                 "source_event_id": int(event_id),
                 "team": side,
             }
+            # Attach provider team id for later mapping (storage phase will turn this into team_id UUID)
+            if side == "home" and home_team_sofa is not None:
+                row["team_sofascore_id"] = int(home_team_sofa)
+            if side == "away" and away_team_sofa is not None:
+                row["team_sofascore_id"] = int(away_team_sofa)
             row.update(team_stats.get(side, {}))
             out.append(row)
         return out
@@ -203,6 +210,8 @@ class StatsProcessor:
         subbed_in_ids: Optional[set] = None,
         subbed_out_ids: Optional[set] = None,
         team_id_map: Optional[Dict[str, int]] = None,
+        home_team_sofa: Optional[int] = None,
+        away_team_sofa: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         teams: List[Tuple[str, Any]] = []
@@ -247,6 +256,11 @@ class StatsProcessor:
                     "team": side,
                     "player_sofascore_id": pid,
                 }
+                # provider team id so storage phase can map to team UUID
+                if side == "home" and home_team_sofa is not None:
+                    rec["team_sofascore_id"] = int(home_team_sofa)
+                if side == "away" and away_team_sofa is not None:
+                    rec["team_sofascore_id"] = int(away_team_sofa)
                 # Only set non-None values to avoid wiping prior data
                 for k, v in extracted.items():
                     if v is not None:

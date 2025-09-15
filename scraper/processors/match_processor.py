@@ -143,20 +143,53 @@ class MatchProcessor:
             # scheduled-events or other snapshots contain stale startTimestamp).
             cps_raw = (base.get("time") or {}).get("currentPeriodStartTimestamp")
             date_utc = _get(base.get("startTimestamp") or base.get("startTimeUTC") or base.get("startTime"))
-            # Determine canonical UTC start_time using a robust preference order:
-            # 1) explicit ISO fields (startTimeUTC, startTime)
-            # 2) numeric startTimestamp (epoch seconds/ms)
-            # Do NOT use currentPeriodStartTimestamp as start_time — it's for match runtime only.
+            # Determine canonical UTC start_time.
+            # PROBLEM OBSERVED: Using naive ISO (no TZ) treated as UTC produced 60–90 min shifts.
+            # FIX: Strictly trust numeric startTimestamp first. Only accept ISO values that are timezone-aware.
+            date_utc = None
+            raw_start_candidates = {
+                "startTimestamp": base.get("startTimestamp"),
+                "startTimeUTC": base.get("startTimeUTC"),
+                "startTime": base.get("startTime"),
+            }
+            # Force ONLY startTimestamp; ignore other candidates for canonical start_time.
+            ts_choice_meta = {"chosen": None, "reason": None, "candidates": raw_start_candidates}
+            st_num = base.get("startTimestamp")
             date_utc = None
             try:
-                candidates = [base.get("startTimeUTC"), base.get("startTime"), base.get("startTimestamp")]
-                for cand in candidates:
-                    v = _get(cand)
-                    if v:
-                        date_utc = v
-                        break
+                if isinstance(st_num, (int, float)) or (isinstance(st_num, str) and str(st_num).isdigit()):
+                    # Ensure we always format as strict ISO: YYYY-MM-DDTHH:MM:SS+00:00 (force seconds + UTC)
+                    raw_iso = _get(st_num)
+                    try:
+                        if raw_iso:
+                            dtp = datetime.fromisoformat(raw_iso.replace("Z", "+00:00"))
+                            # Rebuild with seconds
+                            date_utc = dtp.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+                        else:
+                            date_utc = raw_iso
+                    except Exception:
+                        date_utc = raw_iso
+                    ts_choice_meta["chosen"] = "startTimestamp"
+                    ts_choice_meta["reason"] = "forced_numeric_only"
+                else:
+                    ts_choice_meta["reason"] = "missing_startTimestamp"
+                    # Diagnostic: log once per match if numeric missing
+                    _mp_logger.warning(f"[match_processor][start_timestamp_missing] ev={ev_id} raw={raw_start_candidates}")
+            except Exception as e:
+                ts_choice_meta["error"] = str(e)
+            _mp_logger.info(f"[match_processor][start_time_forced] ev={ev_id} meta={ts_choice_meta} canonical={date_utc}")
+            # Persist the original numeric scheduled start (epoch seconds) separately for drift detection
+            scheduled_start_ts = None
+            try:
+                raw_ts = base.get("startTimestamp")
+                if isinstance(raw_ts, (int, float)):
+                    scheduled_start_ts = int(raw_ts if raw_ts < 10**12 else raw_ts / 1000)
+                elif isinstance(raw_ts, str) and raw_ts.isdigit():
+                    scheduled_start_ts = int(raw_ts)
+                    if scheduled_start_ts > 10**12:
+                        scheduled_start_ts = int(scheduled_start_ts / 1000)
             except Exception:
-                date_utc = None
+                scheduled_start_ts = None
             home_colors = (base.get("homeTeam") or {}).get("teamColors") or {}
             away_colors = (base.get("awayTeam") or {}).get("teamColors") or {}
             home_color = home_colors.get("primary") or "#222222"
@@ -169,6 +202,18 @@ class MatchProcessor:
                     current_period_start = _get(cps)
             except Exception:
                 pass
+            # kickoff_offset_min: difference between actual first period start and scheduled start (if both available)
+            kickoff_offset_min = None
+            try:
+                if current_period_start and scheduled_start_ts:
+                    cps_dt = datetime.fromisoformat(current_period_start.replace("Z", "+00:00"))
+                    sched_dt = datetime.fromtimestamp(scheduled_start_ts, tz=timezone.utc)
+                    delta_min = int((cps_dt - sched_dt).total_seconds() / 60)
+                    # Only store reasonable delays/early starts
+                    if -30 <= delta_min <= 90 and delta_min != 0:
+                        kickoff_offset_min = delta_min
+            except Exception:
+                kickoff_offset_min = None
             is_finished = False
             try:
                 st_raw = (base.get("status") or {}).get("type") or (base.get("status") or {}).get("description") or stat.get("status")
@@ -234,6 +279,10 @@ class MatchProcessor:
                 "source": "sofascore",
                 "source_event_id": ev_id,
                 "start_time": date_utc,
+                "scheduled_start_ts": scheduled_start_ts,  # numeric epoch (sec)
+                "kickoff_offset_min": kickoff_offset_min,  # int or null
+                "_raw_start_fields": raw_start_candidates,
+                "start_time_source": ts_choice_meta.get("chosen") or "startTimestamp",
                 "status": stat["status"],
                 "home_team": (base.get("homeTeam") or {}).get("name"),
                 "away_team": (base.get("awayTeam") or {}).get("name"),
@@ -295,6 +344,8 @@ class MatchProcessor:
                             subbed_in_ids=sub_in_ids,
                             subbed_out_ids=sub_out_ids,
                             team_id_map={"home": home_tid, "away": away_tid},
+                            home_team_sofa=home_tid,
+                            away_team_sofa=away_tid,
                         )
                     )
                 except Exception:
@@ -302,7 +353,14 @@ class MatchProcessor:
             raw_stats = enriched.get("statistics") or enriched.get("_raw_statistics") or {}
             if raw_stats:
                 try:
-                    match_stats.extend(stats_processor.process_match_stats(raw_stats, ev_id))
+                    match_stats.extend(
+                        stats_processor.process_match_stats(
+                            raw_stats,
+                            ev_id,
+                            home_team_sofa=home_tid,
+                            away_team_sofa=away_tid,
+                        )
+                    )
                 except Exception:
                     pass
             raw_shots = enriched.get("_raw_shots")

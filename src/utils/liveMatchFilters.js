@@ -1,5 +1,5 @@
 // src/utils/liveMatchFilters.js - UNIFIED FILTERING LOGIC
-import { normalizeStatus } from "./matchStatusUtils";
+import { normalizeStatus, validateLiveStatus } from "./matchStatusUtils";
 import { LIVE_STALE_SEC, MAX_LIVE_AGE_HOURS } from "../services/live";
 
 // 🔧 UNIFIED: Live statusi koji se smatraju "live"
@@ -50,14 +50,15 @@ export function getValidLiveMatchesUnified(matches, options = {}) {
 
   console.log(`🔍 Filtering ${matches.length} matches (strict: ${strict})`);
 
+  const bridged = [];
   const validMatches = matches.filter((match) => {
-    // 1. Provjeri status
-    const normalizedStatus = normalizeStatus(match.status || match.status_type);
-    const isLiveStatus = LIVE_STATUSES.has(normalizedStatus);
-
-    if (!isLiveStatus) {
-      return false;
+    // 1. Primijeni validateLiveStatus (koji sada može bridge-at upcoming -> live oko kick-offa)
+    const computed = validateLiveStatus(match);
+    if (computed === "live" && normalizeStatus(match.status || match.status_type) === "upcoming") {
+      bridged.push(match);
     }
+    const isLiveStatus = LIVE_STATUSES.has(computed);
+    if (!isLiveStatus) return false;
 
     // 2. Provjeri age (isto kao scraper)
     if (isMatchTooOld(match.start_time, maxAgeHours)) {
@@ -74,9 +75,13 @@ export function getValidLiveMatchesUnified(matches, options = {}) {
     return true;
   });
 
-  console.log(
-    `✅ Valid live matches: ${validMatches.length}/${matches.length}`
-  );
+  console.log(`✅ Valid live matches: ${validMatches.length}/${matches.length}`);
+  if (bridged.length && import.meta.env.DEV) {
+    console.log(
+      `🕐 Kickoff-bridged matches (${bridged.length}):`,
+      bridged.slice(0, 10).map((m) => `${m.home_team} vs ${m.away_team}`)
+    );
+  }
 
   // 🔧 DEBUG: Prikaži breakdown po ligama
   if (import.meta.env.DEV && validMatches.length > 0) {

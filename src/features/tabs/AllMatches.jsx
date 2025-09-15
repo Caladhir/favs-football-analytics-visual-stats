@@ -19,6 +19,7 @@ import {
 import AllMatchesHeader from "../../features/all_matches/AllMatchesHeader";
 import MatchesGrid from "../../ui/MatchesGrid";
 import AllMatchesDebug from "../../features/all_matches/AllMatchesDebug";
+import { compareFilters } from "../../utils/liveMatchFilters";
 import EmptyAllMatches from "../../features/all_matches/EmptyAllMatches";
 import ErrorState from "../../ui/ErrorState";
 
@@ -78,8 +79,27 @@ function chooseBetter(a, b) {
   if (rsB > rsA) return b;
   if (rsA > rsB) return a;
 
+  // Score-aware selection when status rank equal
   const ua = new Date(a.updated_at || a.last_seen_at || 0).getTime();
   const ub = new Date(b.updated_at || b.last_seen_at || 0).getTime();
+
+  // Prefer record with non-null scores if other has nulls
+  const aScoreOk = a.home_score !== null && a.away_score !== null;
+  const bScoreOk = b.home_score !== null && b.away_score !== null;
+  if (aScoreOk && !bScoreOk) return a;
+  if (bScoreOk && !aScoreOk) return b;
+
+  // If both have scores and differ, prefer the fresher updated_at; if timestamps equal, prefer higher total (likely newer)
+  if (aScoreOk && bScoreOk && (a.home_score !== b.home_score || a.away_score !== b.away_score)) {
+    if (ub > ua) return b;
+    if (ua > ub) return a;
+    const aTot = (a.home_score || 0) + (a.away_score || 0);
+    const bTot = (b.home_score || 0) + (b.away_score || 0);
+    if (bTot > aTot) return b;
+    if (aTot > bTot) return a;
+  }
+
+  // Fall back to most recently updated
   if (ub > ua) return b;
   if (ua > ub) return a;
 
@@ -87,6 +107,15 @@ function chooseBetter(a, b) {
   const sb = (b.source || "").toLowerCase();
   if (sb === "sofascore" && sa !== "sofascore") return b;
   if (sa === "sofascore" && sb !== "sofascore") return a;
+
+  if (import.meta.env.DEV) {
+    if (aScoreOk && bScoreOk && (a.home_score !== b.home_score || a.away_score !== b.away_score)) {
+      console.warn("⚠️ Score discrepancy unresolved (same freshness)", {
+        a: { hs: a.home_score, as: a.away_score, updated_at: a.updated_at, source: a.source },
+        b: { hs: b.home_score, as: b.away_score, updated_at: b.updated_at, source: b.source },
+      });
+    }
+  }
 
   return a;
 }
@@ -147,6 +176,28 @@ export default function AllMatches() {
 
     return applyTimeSort(smartSorted, timeSortType);
   }, [dedupedMatches, userPreferences, timeSortType]);
+
+  // DEV: Diagnose missing live matches between strict/relaxed filters
+  useEffect(() => {
+    if (!import.meta.env.DEV || !sortedMatches.length) return;
+    try {
+      const { strict, relaxed, all } = compareFilters(sortedMatches);
+      const missing = all.filter(
+        (m) => !strict.find((s) => s.id === m.id) && relaxed.find((r) => r.id === m.id)
+      );
+      if (missing.length) {
+        console.group("🔎 Potentially filtered live matches (stale/age)");
+        missing.slice(0, 20).forEach((m) => {
+          console.log(
+            `${m.home_team} vs ${m.away_team} status=${m.status} updated_at=${m.updated_at} start_time=${m.start_time}`
+          );
+        });
+        console.groupEnd();
+      }
+    } catch (e) {
+      console.warn("Live filter diagnostics failed", e);
+    }
+  }, [sortedMatches]);
 
   // 3) Optional group by competition
   const groupedMatches = useMemo(() => {
