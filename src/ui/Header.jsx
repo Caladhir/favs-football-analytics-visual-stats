@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@iconify-icon/react";
 
+// SearchBar & ProfileDropdown temporarily hidden per request
 import SearchBar from "../features/header/SearchBar";
 import ProfileDropdown from "../features/header/ProfileDropdown";
 import Navigation from "../features/header/Navigation";
@@ -66,13 +67,13 @@ export default function Header() {
 
       {/* Right: Enhanced Controls */}
       <div className="flex items-center gap-4 relative z-10">
-        {/* Enhanced Search Bar */}
-        <div className="relative">
+        {/* Search Bar hidden */}
+        {/* <div className="relative">
           <SearchBar className="w-32 sm:w-48 md:w-64" />
-        </div>
+        </div> */}
 
-        {/* Enhanced Profile Dropdown */}
-        <div ref={dropdownRef} className="relative hidden md:block">
+        {/* Profile dropdown hidden */}
+        {/* <div ref={dropdownRef} className="relative hidden md:block">
           <button
             onClick={() => setDropdownOpen((prev) => !prev)}
             className="group relative overflow-hidden p-3 rounded-full bg-gradient-to-r from-gray-700/50 to-gray-800/50 border border-gray-600/30 hover:from-red-600/80 hover:to-red-700/80 hover:border-red-500/40 transition-all duration-300 hover:scale-110 shadow-lg backdrop-blur-sm"
@@ -85,15 +86,14 @@ export default function Header() {
               className="relative z-10 text-gray-300 group-hover:text-white transition-colors duration-300"
             />
           </button>
-
           {dropdownOpen && (
             <div className="absolute right-0 top-16 z-50">
               <ProfileDropdown onItemClick={() => setDropdownOpen(false)} />
             </div>
           )}
-        </div>
+        </div> */}
 
-        {/* Enhanced Hamburger Menu for mobile */}
+        {/* Hamburger Menu (kept) */}
         <button
           className="md:hidden group relative overflow-hidden p-3 rounded-full bg-gradient-to-r from-gray-700/50 to-gray-800/50 border border-gray-600/30 hover:from-red-600/80 hover:to-red-700/80 hover:border-red-500/40 transition-all duration-300 hover:scale-110 shadow-lg backdrop-blur-sm"
           onClick={() => setMobileNavOpen((prev) => !prev)}

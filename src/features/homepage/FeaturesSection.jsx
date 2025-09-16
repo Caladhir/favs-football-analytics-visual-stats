@@ -5,13 +5,6 @@ import GlowingText from "./GlowingText";
 export default function FeaturesSection() {
   const features = [
     {
-      title: "AI Predictions",
-      desc: "Machine learning algorithms for accurate match outcome forecasting",
-      icon: "🤖",
-      gradient: "from-purple-500/20 to-pink-500/20",
-      hoverGradient: "from-purple-500 to-pink-500",
-    },
-    {
       title: "Live Tracking",
       desc: "Real-time match monitoring with instant updates and statistics",
       icon: "📡",
@@ -24,13 +17,6 @@ export default function FeaturesSection() {
       icon: "👤",
       gradient: "from-green-500/20 to-emerald-500/20",
       hoverGradient: "from-green-500 to-emerald-500",
-    },
-    {
-      title: "Heat Maps",
-      desc: "Advanced visualization of player movements and game dynamics",
-      icon: "🗺️",
-      gradient: "from-orange-500/20 to-red-500/20",
-      hoverGradient: "from-orange-500 to-red-500",
     },
   ];
 
@@ -48,7 +34,7 @@ export default function FeaturesSection() {
         </div>
 
         {/* Features Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-8 max-w-5xl mx-auto">
           {features.map((feature, index) => (
             <div
               key={index}
@@ -110,28 +96,7 @@ export default function FeaturesSection() {
           ))}
         </div>
 
-        {/* Bottom CTA */}
-        <div className="text-center mt-16">
-          <p className="text-gray-400 mb-6">
-            Ready to experience the future of football analytics?
-          </p>
-          <div className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-red-500/20 to-red-600/20 border border-red-500/30 rounded-full text-red-300 hover:text-white hover:bg-red-500/30 transition-all duration-300 cursor-pointer">
-            <span className="font-semibold">Get Started Today</span>
-            <svg
-              className="w-5 h-5 ml-2"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M13 7l5 5m0 0l-5 5m5-5H6"
-              />
-            </svg>
-          </div>
-        </div>
+        {/* Bottom CTA removed per request */}
       </div>
     </section>
   );

@@ -5,7 +5,7 @@ import asyncio
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 # Path setup
@@ -17,6 +17,7 @@ from core.database import db
 from core.browser import Browser
 from utils.logger import get_logger
 from processors import MatchProcessor, stats_processor
+from processors.stats_processor import build_player_stats_fallback
 
 logger = get_logger(__name__)
 
@@ -93,11 +94,30 @@ class FetchLoop:
             live_data = self._safe_fetch("events/live")
             out += _take_events(live_data)
 
-            # Use local date for scheduled-events endpoint so "today" matches the site's local calendar
-            # (previously used UTC which could shift the day and miss local scheduled matches)
-            today = datetime.now().date().isoformat()
-            sched = self._safe_fetch(f"scheduled-events/{today}")
-            out += _take_events(sched)
+            # Configurable window: past finished + today + near future scheduled
+            past_h = int(os.getenv("FETCH_PAST_HOURS", "12") or 12)
+            future_h = int(os.getenv("FETCH_FUTURE_HOURS", "24") or 24)
+            now_local = datetime.now()
+            # Collect date strings covering window
+            dates: set[str] = set()
+            # Include today always
+            dates.add(now_local.date().isoformat())
+            # If future window crosses day boundary include those dates
+            for dh in range(0, future_h + 1, 6):  # step 6h
+                d = (now_local + timedelta(hours=dh)).date().isoformat()
+                dates.add(d)
+            # Past dates for finished coverage
+            for dh in range(0, past_h + 1, 6):
+                d = (now_local - timedelta(hours=dh)).date().isoformat()
+                dates.add(d)
+            for dstr in sorted(dates):
+                try:
+                    sched = self._safe_fetch(f"scheduled-events/{dstr}")
+                    out += _take_events(sched)
+                except Exception:
+                    pass
+
+            # (Optional future: explicit finished-events endpoint if available) – for now rely on scheduled list which includes finished when querying past date
 
             # Do NOT trim here anymore; trimming is now only for enrichment (after snapshot) unless explicitly forced.
             if os.getenv("FORCE_FETCH_TRIM"):
@@ -108,7 +128,7 @@ class FetchLoop:
 
             # Basic breakdown BEFORE any trimming (current code no longer trims here unless FORCE_FETCH_TRIM)
             try:
-                live_ct = 0; sched_ct = 0; other_ct = 0
+                live_ct = 0; sched_ct = 0; other_ct = 0; finished_ct = 0
                 for ev in out:
                     st_obj = ev.get("status") or {}
                     st_type = (st_obj.get("type") or st_obj.get("description") or ev.get("statusType") or "").lower()
@@ -116,9 +136,11 @@ class FetchLoop:
                         sched_ct += 1
                     elif st_type in {"live","inprogress","in_progress","ht","halftime"}:
                         live_ct += 1
+                    elif st_type in {"finished","after_penalties","ap","ft"}:
+                        finished_ct += 1
                     else:
                         other_ct += 1
-                logger.info(f"📦 Fetched {len(out)} raw events (live={live_ct} scheduled={sched_ct} other={other_ct})")
+                logger.info(f"📦 Fetched {len(out)} raw events (live={live_ct} scheduled={sched_ct} finished={finished_ct} other={other_ct})")
             except Exception:
                 logger.info(f"📦 Fetched {len(out)} raw events (breakdown error)")
             return out
@@ -283,9 +305,10 @@ class FetchLoop:
                 if st:
                     row["_raw_statistics"] = st
 
-                pst = self._safe_fetch(f"event/{ev_id}/player-statistics")
-                if pst:
-                    row["_raw_player_stats"] = pst
+                # Removed deprecated player-statistics endpoint (provider removed / unstable)
+                # We now rely on statistics payload + fallback reconstruction (lineups + incidents)
+                if os.getenv("LOG_PLAYER_STATS_FETCH_REMOVED", "0").lower() in {"1","true","yes"}:
+                    logger.debug(f"[player-stats] skipped deprecated endpoint for event {ev_id}")
 
                 # managers (nije nužno, ali zgodno)
                 mgr = self._safe_fetch(f"event/{ev_id}/managers")
@@ -306,12 +329,18 @@ class FetchLoop:
 
             # dodatno: pretvori raw stats kroz StatsProcessor
             all_match_stats, all_player_stats = [], []
+            fallback_enabled = os.getenv("FALLBACK_PLAYER_STATS", "1").lower() in {"1","true","yes"}
             for ee in enriched_events:
                 eid = ee.get("event_id")
                 if ee.get("_raw_statistics"):
                     all_match_stats.extend(stats_processor.process_match_stats(ee["_raw_statistics"], eid))
                 if ee.get("_raw_player_stats"):
                     all_player_stats.extend(stats_processor.process_player_stats(ee["_raw_player_stats"], eid))
+                elif fallback_enabled:
+                    # Fallback reconstruction (lineups + incidents)
+                    fb = build_player_stats_fallback(ee)
+                    if fb:
+                        all_player_stats.extend(fb)
 
             if all_match_stats:
                 bundle["match_stats"] = all_match_stats

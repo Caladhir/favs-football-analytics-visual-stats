@@ -1,74 +1,32 @@
 // src/features/homepage/TrendingSection.jsx - ENHANCED WITH BETTER STYLING & ENGLISH
 import React, { useState, useEffect } from "react";
 import supabase from "../../services/supabase";
+import { useTopScorers } from "../../hooks/useTopScorers";
 import GlowingText from "./GlowingText";
 
 export default function TrendingSection() {
-  const [players, setPlayers] = useState([]);
+  // Top scorers now come from shared hook (aggregated goals + assists)
+  const {
+    scorers: topScorers7d,
+    loading: scorersLoading,
+    error: scorersError,
+    refetch: refetchScorers,
+  } = useTopScorers(3, "7d");
+  const players = topScorers7d.map((s) => ({
+    name: s.name,
+    goals: s.goals,
+    assists: s.assists,
+    // Trend: simple +goals indicator (could enhance later)
+    trend: s.goals > 0 ? `+${s.goals}` : "+0",
+    team: "", // Team not currently fetched in hook; could extend later
+  }));
   const [predictions, setPredictions] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchTrendingData = async () => {
       try {
-        // 1. Top scorers from last 7 days
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-        const { data: statsData } = await supabase
-          .from("player_stats")
-          .select(
-            `
-            player_id,
-            goals,
-            assists,
-            created_at,
-            players!inner(
-              id,
-              full_name,
-              team
-            )
-          `
-          )
-          .gte("created_at", sevenDaysAgo.toISOString())
-          .order("goals", { ascending: false })
-          .limit(3);
-
-        if (statsData && statsData.length > 0) {
-          const formattedPlayers = statsData.map((stat, index) => ({
-            name: stat.players?.full_name || `Player ${index + 1}`,
-            goals: stat.goals || 0,
-            assists: stat.assists || 0,
-            team: stat.players?.team || "Unknown",
-            trend: stat.goals > 2 ? `+${stat.goals}` : `${stat.goals}`,
-          }));
-          setPlayers(formattedPlayers);
-        } else {
-          // Enhanced fallback data
-          setPlayers([
-            {
-              name: "Erling Haaland",
-              goals: 5,
-              assists: 2,
-              team: "Man City",
-              trend: "+5",
-            },
-            {
-              name: "Kylian Mbappé",
-              goals: 4,
-              assists: 3,
-              team: "Real Madrid",
-              trend: "+4",
-            },
-            {
-              name: "Robert Lewandowski",
-              goals: 3,
-              assists: 1,
-              team: "Barcelona",
-              trend: "+3",
-            },
-          ]);
-        }
+        // Top scorers now handled by hook; we only manage predictions here.
 
         // 2. Upcoming matches for predictions
         const tomorrow = new Date();
@@ -176,30 +134,7 @@ export default function TrendingSection() {
         }
       } catch (error) {
         console.error("Error fetching trending data:", error);
-        // Set enhanced fallback data
-        setPlayers([
-          {
-            name: "Erling Haaland",
-            goals: 5,
-            assists: 2,
-            team: "Man City",
-            trend: "+5",
-          },
-          {
-            name: "Kylian Mbappé",
-            goals: 4,
-            assists: 3,
-            team: "Real Madrid",
-            trend: "+4",
-          },
-          {
-            name: "Robert Lewandowski",
-            goals: 3,
-            assists: 1,
-            team: "Barcelona",
-            trend: "+3",
-          },
-        ]);
+        // Top scorers fallback removed to avoid misleading demo data.
         setPredictions([
           {
             match: "Man City vs Arsenal",
@@ -259,7 +194,7 @@ export default function TrendingSection() {
                   </div>
                 </div>
 
-                {loading ? (
+                {loading || scorersLoading ? (
                   <div className="space-y-6">
                     {[1, 2, 3].map((i) => (
                       <div
@@ -270,6 +205,11 @@ export default function TrendingSection() {
                   </div>
                 ) : (
                   <div className="space-y-6">
+                    {players.length === 0 && (
+                      <div className="text-sm text-gray-400 italic">
+                        No scoring data (last 7d)
+                      </div>
+                    )}
                     {players.map((player, index) => (
                       <div
                         key={index}
@@ -293,9 +233,11 @@ export default function TrendingSection() {
                             <div className="font-semibold text-white text-lg group-hover/item:text-red-400 transition-colors">
                               {player.name}
                             </div>
-                            <div className="text-sm text-gray-400">
-                              {player.team}
-                            </div>
+                            {player.team && (
+                              <div className="text-sm text-gray-400">
+                                {player.team}
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -328,7 +270,9 @@ export default function TrendingSection() {
                     <h3 className="text-2xl md:text-3xl font-bold text-white mb-2">
                       Hot Predictions
                     </h3>
-                    <p className="text-gray-400">AI-powered match forecasts</p>
+                    <p className="text-gray-400">Hot predictions for the day</p>
+                    {/* NOTE: Simulated probability model (placeholder) based on simple "top team" heuristic. */}
+                    {/* This is NOT an ML model; replace later with real prediction engine or odds feed. */}
                   </div>
                 </div>
 

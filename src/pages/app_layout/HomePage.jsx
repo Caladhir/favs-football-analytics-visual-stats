@@ -76,21 +76,17 @@ export default function HomePage() {
               </p>
 
               {/* Main CTA Buttons */}
-              <div className="flex flex-col sm:flex-row gap-4 justify-center mb-12">
+              {/* CTA buttons hidden per request */}
+              {/* <div className="flex flex-col sm:flex-row gap-4 justify-center mb-12">
                 <Link to="/dashboard">
                   <CTAButton>Create Free Account</CTAButton>
                 </Link>
-
                 <Link to="/matches">
-                  <Button
-                    variant="ghost"
-                    size="lg"
-                    leftIcon="mdi:play-circle-outline"
-                  >
+                  <Button variant="ghost" size="lg" leftIcon="mdi:play-circle-outline">
                     View Demo
                   </Button>
                 </Link>
-              </div>
+              </div> */}
             </div>
 
             {/* Feature Cards Grid */}

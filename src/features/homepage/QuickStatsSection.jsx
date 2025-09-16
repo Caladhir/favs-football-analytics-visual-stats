@@ -1,28 +1,20 @@
 // src/features/homepage/QuickStatsSection.jsx - ENHANCED WITH BETTER STYLING
 import React, { useState, useEffect } from "react";
 import supabase from "../../services/supabase";
+import { useLiveMatches } from "../../hooks/useLiveMatches";
 import Card3D from "./Card3D";
 import AnimatedCounter from "./AnimatedCounter";
 
 export default function QuickStatsSection() {
-  const [stats, setStats] = useState({
-    liveMatches: 0,
-    todayMatches: 0,
-    upcomingMatches: 0,
-    accuracy: 0,
-  });
+  const { liveCount } = useLiveMatches();
+  const [stats, setStats] = useState({ todayMatches: 0, upcomingMatches: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchStats = async () => {
       try {
         // 1. Live matches
-        const { count: liveCount } = await supabase
-          .from("matches")
-          .select("*", { count: "exact", head: true })
-          .in("status", ["live", "ht"]);
-
-        // 2. Today's matches
+        // 1. Today's matches (all statuses with start_time today)
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today);
@@ -34,35 +26,25 @@ export default function QuickStatsSection() {
           .gte("start_time", today.toISOString())
           .lt("start_time", tomorrow.toISOString());
 
-        // 3. Upcoming matches (next 7 days)
-        const nextWeek = new Date(today);
+        // 2. UPCOMING: scheduled strictly after NOW (not including currently live) within next 7 days
+        const nextWeek = new Date();
         nextWeek.setDate(nextWeek.getDate() + 7);
-
+        const nowIso = new Date().toISOString();
         const { count: upcomingCount } = await supabase
           .from("matches")
           .select("*", { count: "exact", head: true })
           .eq("status", "scheduled")
-          .gte("start_time", tomorrow.toISOString())
+          .gt("start_time", nowIso)
           .lt("start_time", nextWeek.toISOString());
 
-        // 4. Prediction accuracy (simulated - replace with real logic)
-        const accuracy = 89 + Math.floor(Math.random() * 3); // 89-91%
-
         setStats({
-          liveMatches: liveCount || 0,
           todayMatches: todayCount || 0,
           upcomingMatches: upcomingCount || 0,
-          accuracy: accuracy,
         });
       } catch (error) {
         console.error("Error fetching stats:", error);
         // Set fallback stats
-        setStats({
-          liveMatches: 12,
-          todayMatches: 45,
-          upcomingMatches: 180,
-          accuracy: 89,
-        });
+        setStats({ todayMatches: 45, upcomingMatches: 180 });
       } finally {
         setLoading(false);
       }
@@ -77,7 +59,7 @@ export default function QuickStatsSection() {
   const statCards = [
     {
       title: "Live Matches",
-      value: stats.liveMatches,
+      value: liveCount,
       icon: "🔴",
       color: "from-red-500/20 to-red-600/30",
       subtitle: "happening now",
@@ -94,16 +76,7 @@ export default function QuickStatsSection() {
       value: stats.upcomingMatches,
       icon: "⚡",
       color: "from-yellow-500/20 to-yellow-600/30",
-      suffix: "+",
       subtitle: "next 7 days",
-    },
-    {
-      title: "AI Accuracy",
-      value: stats.accuracy,
-      suffix: "%",
-      icon: "🎯",
-      color: "from-green-500/20 to-green-600/30",
-      subtitle: "prediction rate",
     },
   ];
 
@@ -122,7 +95,7 @@ export default function QuickStatsSection() {
           </div>
 
           {/* Stats Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-6">
             {statCards.map((stat, index) => (
               <Card3D key={index}>
                 <div className="group relative h-full">

@@ -369,6 +369,97 @@ class StatsProcessor:
 
 stats_processor = StatsProcessor()
 
+# ---------------- Fallback builder (lineups + incidents) -----------------
+def build_player_stats_fallback(enriched_event: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Reconstruct minimal player_stats from lineups + incidents when raw endpoint missing.
+
+    Produces only: goals, assists (currently not derivable here so left None), minutes_played,
+    was_subbed_in/out, is_substitute plus zeros for goals where applicable.
+    """
+    try:
+        lineups = (enriched_event.get("lineups") or {})
+        incidents = enriched_event.get("events") or []
+        if not lineups:
+            return []
+        def _name(n: Optional[str]) -> str:
+            return (n or "").strip().lower()
+        ev_id = enriched_event.get("event_id") or enriched_event.get("source_event_id")
+        out_map: Dict[str, Dict[int, Dict[str, Any]]] = {"home": {}, "away": {}}
+        for side in ("home","away"):
+            for p in (lineups.get(side) or []):
+                pobj = p.get("player") or p
+                pid = pobj.get("id")
+                if not pid:
+                    continue
+                out_map[side][int(pid)] = {
+                    "source": "sofascore",
+                    "source_event_id": ev_id,
+                    "team": side,
+                    "player_sofascore_id": int(pid),
+                    "team_sofascore_id": int(enriched_event.get(f"{side}_team_sofa")) if enriched_event.get(f"{side}_team_sofa") else None,
+                    "goals": 0,
+                    "assists": None,
+                    "minutes_played": None,
+                    "is_substitute": not bool(p.get("isStarting")),
+                    "was_subbed_in": False,
+                    "was_subbed_out": False,
+                    "_name": _name(pobj.get("name")),
+                }
+        # Traverse incidents
+        for inc in incidents:
+            side = "home" if inc.get("team") == "home" or inc.get("isHome") else ("away" if inc.get("team") == "away" else None)
+            if side not in ("home","away"):
+                continue
+            minute = None
+            tnode = inc.get("time") or {}
+            if isinstance(tnode, dict):
+                minute = tnode.get("minute")
+            if minute is None:
+                minute = inc.get("minute")
+            itype = (inc.get("type") or inc.get("incidentType") or "").lower()
+            pname = _name((inc.get("player") or {}).get("name") or inc.get("player_name") or inc.get("playerName"))
+            target_pid = None
+            for cand, dat in out_map[side].items():
+                if dat.get("_name") == pname and pname:
+                    target_pid = cand
+                    break
+            if target_pid is None:
+                continue
+            rec = out_map[side][target_pid]
+            if itype in {"goal","penalty_goal","own_goal"}:
+                rec["goals"] = (rec.get("goals") or 0) + 1
+            elif itype == "substitution_in":
+                rec["was_subbed_in"] = True
+                rec["is_substitute"] = True
+                if minute is not None:
+                    rec.setdefault("_in_min", minute)
+            elif itype == "substitution_out":
+                rec["was_subbed_out"] = True
+                if minute is not None:
+                    rec.setdefault("_out_min", minute)
+        # Finalise minutes
+        for side in ("home","away"):
+            for pid, rec in out_map[side].items():
+                inm = rec.pop("_in_min", None)
+                outm = rec.pop("_out_min", None)
+                if inm is None and outm is None:
+                    rec["minutes_played"] = 90 if not rec["is_substitute"] else 0
+                elif inm is not None and outm is None:
+                    rec["minutes_played"] = max(0, 90 - int(inm))
+                elif inm is None and outm is not None:
+                    rec["minutes_played"] = int(outm)
+                else:
+                    rec["minutes_played"] = max(0, int(outm) - int(inm))
+        # Flatten
+        out: List[Dict[str, Any]] = []
+        for side in ("home","away"):
+            for rec in out_map[side].values():
+                rec.pop("_name", None)
+                out.append(rec)
+        return out
+    except Exception:
+        return []
+
 # --- Backwards compatibility helper ---
 def parse_event_statistics(event_id: int, raw: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
     """Compatibility wrapper used by legacy scripts.

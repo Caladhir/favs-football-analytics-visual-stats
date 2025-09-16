@@ -62,12 +62,12 @@ export default function Teams() {
             </p>
           </div>
 
-          {/* Ažurirani refresh button */}
+          {/* Ažurirani refresh button
           <div className="flex justify-center gap-4">
             <RefreshButton isLoading={loading} onClick={refetch} size="lg">
               Refresh Data
             </RefreshButton>
-          </div>
+          </div> */}
         </section>
 
         <div className="container mx-auto px-6 pb-12 space-y-12">
