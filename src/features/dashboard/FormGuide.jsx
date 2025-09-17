@@ -1,8 +1,8 @@
 // src/features/dashboard/FormGuide.jsx - Vertically Centered
-import { useFormGuide } from "../../hooks/useFormGuide";
+import { useTeamForm30d } from "../../hooks/useTeamForm30d";
 
 export default function FormGuide() {
-  const { summary, loading, error } = useFormGuide({ limit: 5 });
+  const { teams, loading, error } = useTeamForm30d({ limit: 5 });
 
   return (
     <div className="h-full p-5 bg-card rounded-2xl shadow border border-border/50 flex flex-col">
@@ -10,9 +10,7 @@ export default function FormGuide() {
         <div className="w-8 h-8 rounded-full bg-emerald-600/20 text-emerald-400 inline-flex items-center justify-center">
           🏆
         </div>
-        <div className="text-sm font-semibold">
-          Top Form (Wins last {summary.periodDays}d)
-        </div>
+        <div className="text-sm font-semibold">Top Form (30d)</div>
       </div>
 
       {loading ? (
@@ -23,13 +21,13 @@ export default function FormGuide() {
         </div>
       ) : error ? (
         <div className="text-sm text-destructive">{error}</div>
-      ) : summary.teams.length === 0 ? (
+      ) : teams.length === 0 ? (
         <div className="text-sm text-muted-foreground">
           No finished matches in period.
         </div>
       ) : (
         <ol className="text-sm flex-1 overflow-auto custom-scroll pr-1">
-          {summary.teams.map((t, idx) => (
+          {teams.map((t, idx) => (
             <li
               key={t.team_id}
               className="flex items-center justify-between py-1.5 border-b border-border/30 last:border-b-0"
@@ -45,19 +43,23 @@ export default function FormGuide() {
                   {t.name}
                 </span>
               </div>
-              <div className="flex items-center gap-3 text-xs font-mono">
-                <span className="text-emerald-400 font-semibold">
-                  {t.wins}W
+              <div className="flex items-center gap-4 text-xs font-mono">
+                <span className="text-muted-foreground" title="Played">
+                  P:{t.played}
                 </span>
-                <span className="text-muted-foreground">{t.played}P</span>
-                <span className="text-foreground">{t.winPct}%</span>
+                <span className="text-emerald-400 font-semibold" title="Wins">
+                  W:{t.wins}
+                </span>
+                <span className="text-primary font-semibold" title="Goals For">
+                  G:{t.goals_for}
+                </span>
               </div>
             </li>
           ))}
         </ol>
       )}
       <div className="mt-2 text-[10px] text-muted-foreground/70 italic">
-        Ranked by wins, then win% (last 30 days)
+        Rank: W, Points, Goals, GD, Win%, Played (30d)
       </div>
     </div>
   );

@@ -84,6 +84,7 @@ export default function MatchPage() {
           onRefresh={refetch}
           refreshing={bgRefreshing}
           scorers={scorers}
+          events={events}
         />
 
         <MatchTabs>

@@ -243,15 +243,15 @@ export default function TrendingSection() {
 
                         <div className="text-right">
                           <div className="font-bold text-red-400 text-xl">
-                            {player.goals} goals
-                          </div>
-                          {player.assists > 0 && (
-                            <div className="text-sm text-gray-400">
-                              {player.assists} assists
-                            </div>
-                          )}
-                          <div className="text-xs text-green-400 font-semibold bg-green-400/20 px-2 py-1 rounded-full mt-1">
-                            {player.trend}
+                            {player.goals}
+                            <span className="text-sm text-gray-400 ml-1">
+                              g
+                            </span>
+                            {player.assists > 0 && (
+                              <span className="text-sm text-gray-500 ml-2">
+                                {player.assists}a
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

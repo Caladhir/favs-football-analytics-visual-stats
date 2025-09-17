@@ -2,7 +2,11 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import supabase from "../services/supabase";
 import { parseMatchISO } from "../utils/formatMatchTime";
-import { getValidLiveMatchesStrict } from "../utils/liveMatchFilters";
+import {
+  getValidLiveMatchesStrict,
+  getLiveWithFallback,
+} from "../utils/liveMatchFilters";
+import { reconcileScoresArray } from "../utils/reconcileScore";
 
 const INTERVALS = {
   ultra: 2000, // >50 live
@@ -18,6 +22,7 @@ export function useLiveMatches() {
   const [error, setError] = useState(null);
   const [lastRefreshed, setLastRefreshed] = useState(null);
   const [isRealtimeActive, setIsRealtimeActive] = useState(false);
+  const [liveMode, setLiveMode] = useState("strict"); // "strict" | "relaxed"
 
   const mountedRef = useRef(true);
   const timerRef = useRef(null);
@@ -34,6 +39,7 @@ export function useLiveMatches() {
     return INTERVALS.idle;
   };
 
+  const previousNonEmptyRef = useRef([]);
   const fetchOnce = useCallback(async (foreground = false) => {
     if (!mountedRef.current) return;
     const now = Date.now();
@@ -70,8 +76,10 @@ export function useLiveMatches() {
       if (!mountedRef.current) return;
 
       if (err) {
+        console.warn("❌ live fetch error", err);
         setError(err.message || "Fetch error");
-        setMatches([]);
+        // SAFEGUARD: keep previous list if we had data
+        setMatches((cur) => (cur.length ? cur : []));
       } else {
         // Filter out matches that are not actually started yet (start_time more than 10 minutes in future)
         const now = Date.now();
@@ -87,8 +95,38 @@ export function useLiveMatches() {
         });
 
         // Apply unified live-match filter to ensure finished/stale matches are excluded
-        const valid = getValidLiveMatchesStrict(rowsFiltered);
-        setMatches(valid);
+        const beforeCount = rowsFiltered.length;
+        const { list: valid, mode } = getLiveWithFallback(rowsFiltered);
+        setLiveMode(mode);
+        if (
+          beforeCount > 0 &&
+          valid.length === 0 &&
+          previousNonEmptyRef.current.length
+        ) {
+          console.warn(
+            "⚠️ Live filter 0 despite candidates; preserving previousNonEmpty (grace)."
+          );
+          setMatches(previousNonEmptyRef.current);
+        } else {
+          // Reconcile scores with events (batch fetch) only if list changed length or ids changed
+          let finalList = valid;
+          try {
+            if (valid.length) {
+              const ids = valid.map((m) => m.id);
+              const { data: evRows, error: evErr } = await supabase
+                .from("match_events")
+                .select("match_id,event_type,team,minute,player_name")
+                .in("match_id", ids);
+              if (!evErr && Array.isArray(evRows)) {
+                finalList = reconcileScoresArray(valid, evRows);
+              }
+            }
+          } catch (reErr) {
+            console.warn("⚠️ live reconcile failed", reErr);
+          }
+          setMatches(finalList);
+          if (finalList.length > 0) previousNonEmptyRef.current = finalList;
+        }
         setLastRefreshed(Date.now());
       }
     } catch (e) {
@@ -139,9 +177,12 @@ export function useLiveMatches() {
               return next;
             })();
 
-            // Apply strict live filter to merged list to ensure finished/stale entries are removed
+            // Apply fallback pipeline to merged list
             try {
-              return getValidLiveMatchesStrict(merged);
+              const { list, mode } = getLiveWithFallback(merged);
+              setLiveMode(mode);
+              if (list.length > 0) previousNonEmptyRef.current = list;
+              return list;
             } catch {
               return merged;
             }
@@ -211,6 +252,7 @@ export function useLiveMatches() {
     lastRefreshed,
     isRealtimeActive,
     refreshNow,
+    liveMode,
     fetchLiveMatches: fetchOnce, // backward compat (prima true/false)
   };
 }

@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import supabase from "../services/supabase";
 import { validateLiveStatus } from "../utils/matchStatusUtils";
+import { reconcileSingle } from "../utils/reconcileScore";
 
 export default function useMatchData(matchId) {
   const [match, setMatch] = useState(null);
@@ -38,6 +39,7 @@ export default function useMatchData(matchId) {
           .eq("id", matchId)
           .maybeSingle();
         if (em) throw em;
+        // We'll temporarily assign match; after events fetch we will reconcile again with events for display_* fields.
         setMatch(m);
 
         // Early stop if no match
@@ -62,24 +64,80 @@ export default function useMatchData(matchId) {
         const eventsArr = ev || [];
         setEvents(eventsArr);
         // Derive scorers list (goal, penalty_goal, own_goal, penalty, own goal nuance)
-        const goalEvents = eventsArr
-          .filter((e) =>
+        // --- GOAL EVENT NORMALIZATION --------------------------------------------------
+        function buildSimplerScorers(matchRow, rawEvents) {
+          if (!matchRow) return [];
+          const targetHome =
+            matchRow.display_home_score ?? matchRow.home_score ?? 0;
+          const targetAway =
+            matchRow.display_away_score ?? matchRow.away_score ?? 0;
+          const goalLike = rawEvents.filter((e) =>
             ["goal", "penalty_goal", "own_goal"].includes(e.event_type)
-          )
-          .sort(
-            (a, b) =>
-              (a.minute ?? 0) - (b.minute ?? 0) || a.id.localeCompare(b.id)
-          )
-          .map((e) => ({
+          );
+          // Stable sort: minute asc (null/negative last), then created_at, then id
+          goalLike.sort((a, b) => {
+            const ma = (a.minute ?? 9999) < 0 ? 9998 : a.minute ?? 9999;
+            const mb = (b.minute ?? 9999) < 0 ? 9998 : b.minute ?? 9999;
+            return (
+              ma - mb ||
+              new Date(a.created_at).getTime() -
+                new Date(b.created_at).getTime() ||
+              a.id.localeCompare(b.id)
+            );
+          });
+          const dedupExact = [];
+          const seen = new Set();
+          for (const g of goalLike) {
+            const creditedTeam =
+              g.event_type === "own_goal"
+                ? g.team === "home"
+                  ? "away"
+                  : g.team === "away"
+                  ? "home"
+                  : g.team
+                : g.team;
+            const key = `${creditedTeam}|${g.player_name || ""}|${
+              g.event_type
+            }|${g.minute ?? "na"}`;
+            if (seen.has(key)) continue; // exact duplicate only
+            seen.add(key);
+            dedupExact.push({ ...g, creditedTeam });
+          }
+          // Trim extras if provider score lower (remove from end so earliest minutes remain)
+          const homeEvents = dedupExact.filter(
+            (g) => g.creditedTeam === "home"
+          );
+          const awayEvents = dedupExact.filter(
+            (g) => g.creditedTeam === "away"
+          );
+          while (homeEvents.length > targetHome) homeEvents.pop();
+          while (awayEvents.length > targetAway) awayEvents.pop();
+          // Merge preserving original chronological order
+          const keptIds = new Set(
+            [...homeEvents, ...awayEvents].map((g) => g.id)
+          );
+          const finalOrdered = dedupExact.filter((g) => keptIds.has(g.id));
+          return finalOrdered.map((e) => ({
             id: e.id,
             minute: e.minute,
             player: e.player_name || "Unknown",
-            team: e.team, // 'home' | 'away'
+            team: e.creditedTeam,
             type: e.event_type,
             isOwnGoal: e.event_type === "own_goal",
-            isPenalty: e.event_type === "penalty_goal", // separate flag
+            isPenalty: e.event_type === "penalty_goal",
           }));
-        setScorers(goalEvents);
+        }
+        setScorers(buildSimplerScorers(m, eventsArr));
+
+        // --- Score reconciliation (provider-first, consistent with listing cards) ---
+        try {
+          if (m) {
+            const reconciled = reconcileSingle(m, eventsArr);
+            setMatch(reconciled);
+          }
+        } catch (recErr) {
+          console.warn("[useMatchData] score reconciliation failed", recErr);
+        }
 
         // 3) LINEUPS
         const { data: lu, error: elu } = await supabase

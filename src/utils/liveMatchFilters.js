@@ -128,7 +128,32 @@ export function getValidLiveMatchesRelaxed(matches, opts = {}) {
   });
 }
 
-// 🔧 UTILITY: Compare different filters
+// � AUTO FALLBACK: prvo strict, a ako dobije 0 a postoji barem 1 kandidat sa live statusom, probaj relaxed
+export function getLiveWithFallback(matches) {
+  const strict = getValidLiveMatchesStrict(matches);
+  if (strict.length > 0) {
+    return { list: strict, mode: "strict" };
+  }
+  // Kandidati koji imaju live status (bez dodatnih filtera) – da znamo ima li smisla fallback
+  const anyLiveStatus = (matches || []).filter((m) =>
+    ["live", "ht", "inprogress", "halftime"].includes(
+      (m.status || m.status_type || "").toLowerCase()
+    )
+  );
+  if (anyLiveStatus.length === 0) {
+    return { list: strict, mode: "strict" };
+  }
+  const relaxed = getValidLiveMatchesRelaxed(matches);
+  if (relaxed.length > 0) {
+    console.warn(
+      `⚠️ Live fallback activated: strict=0, relaxed=${relaxed.length} (candidates=${anyLiveStatus.length})`
+    );
+    return { list: relaxed, mode: "relaxed" };
+  }
+  return { list: strict, mode: "strict" };
+}
+
+// �🔧 UTILITY: Compare different filters
 export function compareFilters(matches) {
   const strict = getValidLiveMatchesStrict(matches);
   const relaxed = getValidLiveMatchesRelaxed(matches);

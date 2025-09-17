@@ -38,6 +38,7 @@ export default function LiveMatches() {
     isRealtimeActive,
     refreshNow,
     fetchLiveMatches,
+    liveMode,
   } = useLiveMatches();
 
   // Animation trigger
@@ -291,11 +292,19 @@ export default function LiveMatches() {
           isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
         }`}
       >
-        <div className="bg-gradient-to-r from-green-600/20 via-green-500/30 to-green-600/20 backdrop-blur-sm border border-green-500/30 text-green-300 px-4 py-2 rounded-xl text-sm flex items-center gap-2">
-          <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-          Live updates every 30 seconds
-          {isRealtimeActive && (
-            <span className="text-xs opacity-75">• Active</span>
+        <div className="flex flex-wrap justify-center gap-3">
+          <div className="bg-gradient-to-r from-green-600/20 via-green-500/30 to-green-600/20 backdrop-blur-sm border border-green-500/30 text-green-300 px-4 py-2 rounded-xl text-sm flex items-center gap-2">
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+            Live updates adaptive
+            {isRealtimeActive && (
+              <span className="text-xs opacity-75">• Realtime</span>
+            )}
+          </div>
+          {liveMode === "relaxed" && (
+            <div className="bg-gradient-to-r from-yellow-600/20 via-yellow-500/30 to-yellow-600/20 backdrop-blur-sm border border-yellow-500/30 text-yellow-300 px-4 py-2 rounded-xl text-sm flex items-center gap-2">
+              <span>⚠️ Fallback mode</span>
+              <span className="text-xs opacity-70">(relaxed filter)</span>
+            </div>
           )}
         </div>
       </div>

@@ -17,7 +17,8 @@ function ScorerItem({ scorer }) {
 }
 
 export default function TopScorers() {
-  const [period, setPeriod] = useState("30d");
+  // Default switched to full season view
+  const [period, setPeriod] = useState("season");
   const TOP_LIMIT = 10; // increased to show more scorers and reduce empty space
   const { scorers, loading, error, refetch } = useTopScorers(TOP_LIMIT, period);
 

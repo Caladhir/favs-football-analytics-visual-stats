@@ -1,15 +1,31 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import useMatchesByDate from "../../hooks/useMatchesByDate";
 import MatchesGrid from "../../ui/MatchesGrid";
 import LoadingState from "../../ui/LoadingState";
 import ErrorState from "../../ui/ErrorState";
 import EmptyUpcoming from "../upcoming_matches/EmptyUpcomingMatches";
 import UpcomingHeader from "../upcoming_matches/UpcomingMatchesHeader";
-import { normalizeStatus } from "../../utils/matchStatusUtils";
+import {
+  normalizeStatus,
+  validateLiveStatus,
+} from "../../utils/matchStatusUtils";
 
 /* --- helpers --- */
-const EXCLUDE = new Set(["live", "ht", "finished", "ft"]);
-const GRACE_MINUTES = 20;
+// Exclude all live/halftime and finished variants explicitly; anything we consider 'in progress'
+const EXCLUDE = new Set([
+  "live",
+  "ht",
+  "inprogress",
+  "in_progress",
+  "halftime",
+  "1h",
+  "2h",
+  "finished",
+  "ft",
+  "full_time",
+]);
+// Grace window: allow a small negative offset if system clock / provider drift (<2m) – previously 20m which let early-live linger.
+const GRACE_MINUTES = 2;
 
 function startOfDay(d) {
   const x = d instanceof Date ? new Date(d) : new Date(d || Date.now());
@@ -18,8 +34,11 @@ function startOfDay(d) {
 }
 
 function isStrictUpcoming(match, selectedDate, now = new Date()) {
+  // If bridge logic already considers it live/ht, exclude immediately.
+  const bridged = validateLiveStatus(match);
+  if (bridged === "live" || bridged === "ht") return false;
+
   const status = normalizeStatus(match.status || match.status_type);
-  // sve što NIJE “upcoming” makni
   if (EXCLUDE.has(status)) return false;
 
   const start = new Date(match.start_time);
@@ -30,12 +49,13 @@ function isStrictUpcoming(match, selectedDate, now = new Date()) {
   const isToday = daySel === dayNow;
 
   if (isToday) {
-    return start.getTime() >= now.getTime() - GRACE_MINUTES * 60 * 1000;
+    // Exclude if kickoff passed more than -GRACE_MINUTES (i.e. real-time minute badge should appear in live tab)
+    const diffMs = start.getTime() - now.getTime(); // positive => future
+    if (diffMs < -GRACE_MINUTES * 60 * 1000) return false; // already started
+    return true;
   }
-
-  if (daySel > dayNow) return true;
-
-  return false;
+  if (daySel > dayNow) return true; // future day
+  return false; // past day
 }
 
 function dedupeByTeamsTime(list = []) {
@@ -67,15 +87,28 @@ export default function UpcomingMatches() {
   );
   const today = startOfDay(new Date());
 
+  // Tick every 20s to auto-recompute without manual refresh so items leave Upcoming promptly
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 20000);
+    return () => clearInterval(id);
+  }, []);
+
   const { matches, loading, backgroundRefreshing, error, refetch } =
     useMatchesByDate(selectedDate, { enabled: true });
 
   const sortedUpcoming = useMemo(() => {
     const now = new Date();
 
-    const upcomingOnly = (matches || []).filter((m) =>
-      isStrictUpcoming(m, selectedDate, now)
-    );
+    let excludedLive = 0;
+    const upcomingOnly = (matches || []).filter((m) => {
+      const keep = isStrictUpcoming(m, selectedDate, now);
+      if (!keep) {
+        const st = normalizeStatus(m.status || m.status_type);
+        if (EXCLUDE.has(st)) excludedLive += 1;
+      }
+      return keep;
+    });
 
     const deduped = dedupeByTeamsTime(upcomingOnly);
 
@@ -88,11 +121,13 @@ export default function UpcomingMatches() {
       console.log(
         `🔄 Upcoming filter: total=${matches?.length || 0} → upcoming=${
           upcomingOnly.length
-        } → deduped=${deduped.length}`
+        } → deduped=${deduped.length} (excluded_live=${excludedLive})`
       );
     }
+    // Attach debug meta (dev only)
+    deduped._excludedLive = excludedLive; // harmless property for optional badge
     return deduped;
-  }, [matches, selectedDate]);
+  }, [matches, selectedDate, tick]);
 
   if (loading) return <LoadingState message="Loading upcoming matches..." />;
   if (error) return <ErrorState error={error} onRetry={refetch} />;
@@ -119,6 +154,15 @@ export default function UpcomingMatches() {
         count={sortedUpcoming.length}
         backgroundRefreshing={backgroundRefreshing}
       />
+
+      {import.meta.env.DEV && sortedUpcoming._excludedLive > 0 && (
+        <div className="flex justify-center mb-4">
+          <div className="px-4 py-1 rounded-full text-xs bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
+            Filtered out {sortedUpcoming._excludedLive} live/ht matches from
+            this date
+          </div>
+        </div>
+      )}
 
       <MatchesGrid
         groupByCompetition={true}

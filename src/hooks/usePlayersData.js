@@ -1,6 +1,10 @@
 // src/hooks/usePlayersData.js - Za vašu stvarnu bazu podataka
 import { useState, useEffect, useCallback } from "react";
 import supabase from "../services/supabase";
+import {
+  aggregatePlayerStats,
+  attachAggregatedStats,
+} from "../utils/playerStatsAggregator";
 
 export const usePlayersData = (options = {}) => {
   const {
@@ -248,91 +252,22 @@ export const usePlayersData = (options = {}) => {
           }
           statsData.push(...(data || []));
         }
-        const agg = {};
-        statsData.forEach((s) => {
-          if (!agg[s.player_id])
-            agg[s.player_id] = {
-              games: 0,
-              goals: 0,
-              assists: 0,
-              shots: 0,
-              on: 0,
-              passes: 0,
-              tackles: 0,
-              minutes: 0,
-              touches: 0,
-              ratings: [],
-            };
-          const a = agg[s.player_id];
-          a.games += 1;
-          a.goals += s.goals || 0;
-          a.assists += s.assists || 0;
-          a.shots += s.shots_total || 0;
-          a.on += s.shots_on_target || 0;
-          a.passes += s.passes || 0;
-          a.tackles += s.tackles || 0;
-          a.minutes += s.minutes_played || 0;
-          a.touches += s.touches || 0;
-          if (s.rating && s.rating > 0) a.ratings.push(Number(s.rating));
-        });
-        playersWithStats = filtered.map((pl) => {
-          const s = agg[pl.id];
-          if (!s)
-            return {
-              ...pl,
-              stats: {
-                games: 0,
-                goals: 0,
-                assists: 0,
-                shots: 0,
-                shotsOnTarget: 0,
-                passes: 0,
-                tackles: 0,
-                minutes: 0,
-                touches: 0,
-                rating: 0,
-                goalsPerGame: 0,
-                assistsPerGame: 0,
-                goalsPer90: 0,
-                assistsPer90: 0,
-                shotAccuracy: 0,
-                passAccuracy: 0,
+        const agg = aggregatePlayerStats(statsData);
+        // Backwards compatibility: aggregator uses shots_on_target key
+        // while legacy used 'on' internally. attachAggregatedStats normalizes shape.
+        playersWithStats = attachAggregatedStats(
+          filtered.map((pl) => ({ ...pl })),
+          // adapt key names for aggregator expectations
+          Object.fromEntries(
+            Object.entries(agg).map(([pid, s]) => [
+              pid,
+              {
+                ...s,
+                shots_on_target: s.shots_on_target ?? s.shots_on_target ?? 0,
               },
-            };
-          const avgR = s.ratings.length
-            ? s.ratings.reduce((x, y) => x + y, 0) / s.ratings.length
-            : 0;
-          const goalsPerGame = s.games ? +(s.goals / s.games).toFixed(2) : 0;
-          const assistsPerGame = s.games
-            ? +(s.assists / s.games).toFixed(2)
-            : 0;
-          const denom90 = s.minutes ? s.minutes / 90 : 0;
-          const goalsPer90 = denom90 ? +(s.goals / denom90).toFixed(2) : 0;
-          const assistsPer90 = denom90 ? +(s.assists / denom90).toFixed(2) : 0;
-          const shotAccuracy =
-            s.on > 0 && s.shots > 0 ? +((s.on / s.shots) * 100).toFixed(1) : 0;
-          return {
-            ...pl,
-            stats: {
-              games: s.games,
-              goals: s.goals,
-              assists: s.assists,
-              shots: s.shots,
-              shotsOnTarget: s.on,
-              passes: s.passes,
-              tackles: s.tackles,
-              minutes: s.minutes,
-              touches: s.touches,
-              rating: +avgR.toFixed(1),
-              goalsPerGame,
-              assistsPerGame,
-              goalsPer90,
-              assistsPer90,
-              shotAccuracy,
-              passAccuracy: shotAccuracy,
-            },
-          };
-        });
+            ])
+          )
+        );
       }
 
       // Additional client-side search refinement (case-insensitive)

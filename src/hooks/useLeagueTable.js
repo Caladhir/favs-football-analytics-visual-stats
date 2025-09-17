@@ -254,48 +254,43 @@ export function useLeagueTable(options = {}) {
       if (mode === "table") {
         setTeams(sortedTeams.slice(0, limit));
       } else if (mode === "leaders") {
-        // Get league leaders (top team from each major league)
-        const leagues = [
-          "Premier League",
-          "La Liga",
-          "Serie A",
-          "Bundesliga",
-          "Ligue 1",
-          "HNL",
-        ];
-        const leaders = [];
-
-        leagues.forEach((league) => {
-          const leagueTeams = sortedTeams.filter(
-            (team) => team.league === league
-          );
-          if (leagueTeams.length > 0) {
-            leaders.push(leagueTeams[0]);
+        // Dynamic league leaders: pick top team for every league present in dataset
+        const leadersMap = new Map();
+        for (const team of sortedTeams) {
+          if (!leadersMap.has(team.league)) {
+            leadersMap.set(team.league, team);
           }
+        }
+        const leaders = Array.from(leadersMap.values()).sort((a, b) => {
+          if (b.points !== a.points) return b.points - a.points;
+          if (b.goalDifference !== a.goalDifference)
+            return b.goalDifference - a.goalDifference;
+          return b.goalsFor - a.goalsFor;
         });
-
         setLeagueLeaders(leaders);
       } else if (mode === "stats") {
-        // Best Attack (highest goals per match)
+        // Best Attack (total goals scored in period)
         const attackLeaders = [...sortedTeams]
-          .sort((a, b) => b.goalsPerMatch - a.goalsPerMatch)
+          .sort(
+            (a, b) =>
+              b.goalsFor - a.goalsFor || b.goalsPerMatch - a.goalsPerMatch
+          )
           .slice(0, 5);
         setBestAttack(attackLeaders);
 
-        // Best Defense (lowest goals conceded per match)
-        const defenseLeaders = [...sortedTeams]
-          .sort((a, b) => a.goalsConcededPerMatch - b.goalsConcededPerMatch)
+        // Best Defense (lowest goals conceded per match) - prefer teams with a logo
+        const defenseCandidates = [...sortedTeams].filter((t) => t.logo_url);
+        const defenseLeaders = (
+          defenseCandidates.length ? defenseCandidates : [...sortedTeams]
+        )
+          .sort(
+            (a, b) =>
+              a.goalsConcededPerMatch - b.goalsConcededPerMatch ||
+              a.goalsAgainst - b.goalsAgainst
+          )
           .slice(0, 5);
         setBestDefense(defenseLeaders);
-
-        // Best Form (if form data available)
-        if (includeForm) {
-          const formLeaders = [...sortedTeams]
-            .filter((team) => team.form && team.form.length >= 3)
-            .sort((a, b) => b.formScore - a.formScore)
-            .slice(0, 5);
-          setBestForm(formLeaders);
-        }
+        // Legacy bestForm removed (now provided by unified useTeamForm30d hook)
       }
     } catch (err) {
       if (!mountedRef.current) return;

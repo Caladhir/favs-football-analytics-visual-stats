@@ -1,8 +1,10 @@
 // src/features/homepage/FeaturesSection.jsx - ENHANCED WITH MODERN STYLING
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import GlowingText from "./GlowingText";
 
 export default function FeaturesSection() {
+  const navigate = useNavigate();
   const features = [
     {
       title: "Live Tracking",
@@ -40,6 +42,11 @@ export default function FeaturesSection() {
               key={index}
               className="group relative cursor-pointer"
               style={{ animationDelay: `${index * 0.1}s` }}
+              onClick={() => {
+                if (feature.title === "Live Tracking") navigate("/matches");
+                else if (feature.title === "Player Analytics")
+                  navigate("/players");
+              }}
             >
               {/* Main card */}
               <div

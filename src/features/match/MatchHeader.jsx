@@ -5,13 +5,30 @@ import {
   calculateDisplayMinute,
 } from "../../utils/matchStatusUtils";
 
-export default function MatchHeader({ match, onRefresh, refreshing, scorers }) {
+export default function MatchHeader({
+  match,
+  onRefresh,
+  refreshing,
+  scorers,
+  events = [], // still received for scorers list, but score already reconciled in hook
+}) {
   if (!match) return null;
 
   const { formattedDate, formattedTime } = formatMatchTime(match.start_time);
   const status = validateLiveStatus(match);
   const isLive = status === "live" || status === "ht";
   const minute = isLive ? calculateDisplayMinute(match) : null;
+
+  // Scores already reconciled in useMatchData -> use display_* fields with fallback
+  const displayHome =
+    match.display_home_score != null
+      ? match.display_home_score
+      : match.home_score;
+  const displayAway =
+    match.display_away_score != null
+      ? match.display_away_score
+      : match.away_score;
+  const mismatch = Boolean(match.score_mismatch);
 
   return (
     <div className="mb-6 rounded-2xl border border-white/10 bg-gradient-to-b from-zinc-900/60 to-zinc-900/30 p-4 md:p-6">
@@ -43,10 +60,23 @@ export default function MatchHeader({ match, onRefresh, refreshing, scorers }) {
         </div>
 
         <div className="text-center">
-          <div className="text-4xl font-bold md:text-5xl">
-            {match.home_score ?? 0}{" "}
-            <span className="mx-2 text-zinc-600">–</span>{" "}
-            {match.away_score ?? 0}
+          <div className="text-4xl font-bold md:text-5xl flex flex-col items-center">
+            <span>
+              {displayHome} <span className="mx-2 text-zinc-600">–</span>{" "}
+              {displayAway}
+            </span>
+            {mismatch && (
+              <span
+                className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-300"
+                title={`Score source: ${
+                  match.score_source || "unknown"
+                }. Event goals=${match.event_score_home}-${
+                  match.event_score_away
+                } DB=${match.home_score}-${match.away_score}`}
+              >
+                adjusted
+              </span>
+            )}
           </div>
           <div className="mt-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
             {isLive ? (

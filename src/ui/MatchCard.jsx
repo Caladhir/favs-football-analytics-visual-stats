@@ -241,7 +241,9 @@ export default function MatchCard({ match }) {
               </span>
             </div>
             <div className={scoreStyle}>
-              {match.home_score !== null
+              {match.display_home_score != null
+                ? match.display_home_score
+                : match.home_score != null
                 ? match.home_score
                 : statusInfo.isUpcoming
                 ? "-"
@@ -260,7 +262,9 @@ export default function MatchCard({ match }) {
               </span>
             </div>
             <div className={scoreStyle}>
-              {match.away_score !== null
+              {match.display_away_score != null
+                ? match.display_away_score
+                : match.away_score != null
                 ? match.away_score
                 : statusInfo.isUpcoming
                 ? "-"
@@ -276,6 +280,14 @@ export default function MatchCard({ match }) {
           >
             {statusText}
           </span>
+          {match.score_mismatch && (
+            <span
+              className="ml-2 px-2 py-1 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-300"
+              title={`Adjusted score ${match.display_home_score}-${match.display_away_score} (DB ${match.home_score}-${match.away_score})`}
+            >
+              adj
+            </span>
+          )}
 
           <div className="text-right text-xs text-muted-foreground space-y-1">
             <div className="flex items-center space-x-1">

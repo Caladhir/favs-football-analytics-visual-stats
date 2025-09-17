@@ -1,9 +1,8 @@
-// src/components/teams/StatsCards.jsx - RED THEME VERSION
+// src/components/teams/StatsCards.jsx - RED THEME VERSION (Updated attack metric)
 import React from "react";
 import FormIndicator from "./FormIndicator";
 import TeamLogo from "../../ui/TeamLogo";
 
-// Individual Stat Card Component
 function StatCard({
   title,
   subtitle,
@@ -19,7 +18,6 @@ function StatCard({
         <div className="p-6">
           <div className="h-6 w-32 bg-muted/40 rounded animate-pulse mb-1" />
           <div className="h-4 w-48 bg-muted/40 rounded animate-pulse mb-4" />
-
           <div className="space-y-3">
             {[...Array(3)].map((_, i) => (
               <div key={i} className="h-8 bg-muted/40 rounded animate-pulse" />
@@ -30,24 +28,17 @@ function StatCard({
     );
   }
 
-  const handleTeamClick = (team) => {
-    if (onTeamClick) {
-      onTeamClick(team);
-    }
-  };
+  const handleTeamClick = (team) => onTeamClick && onTeamClick(team);
 
   return (
     <div className="bg-card/80 backdrop-blur-sm rounded-2xl shadow-xl border border-border/50 overflow-hidden group hover:border-red-500/30 transition-colors">
       <div className="p-6">
-        {/* Header */}
         <div className="mb-4">
           <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
             {icon} {title}
           </h3>
           <p className="text-gray-400 text-sm">{subtitle}</p>
         </div>
-
-        {/* Data List */}
         <div className="space-y-3">
           {data.length === 0 ? (
             <div className="text-center py-4">
@@ -65,7 +56,13 @@ function StatCard({
                     #{index + 1}
                   </span>
                   <TeamLogo
-                    src={team.logo_url}
+                    src={
+                      team.logo_url ||
+                      team.emblem_url ||
+                      team.crest ||
+                      team.badge ||
+                      team.logo
+                    }
                     alt={`${team.name} logo`}
                     className="w-6 h-6"
                   />
@@ -73,20 +70,21 @@ function StatCard({
                     {team.name}
                   </span>
                 </div>
-
-                {/* Value display */}
                 <div className="font-bold">
                   {valueKey === "form" ? (
                     <FormIndicator form={team.form} />
                   ) : (
                     <span
                       className={`
-                      ${valueKey === "goalsPerMatch" ? "text-red-400" : ""}
-                      ${
-                        valueKey === "goalsConcededPerMatch" ? "text-white" : ""
-                      }
-                      ${valueKey === "points" ? "text-red-400" : ""}
-                    `}
+                        ${valueKey === "goalsPerMatch" ? "text-red-400" : ""}
+                        ${valueKey === "goalsFor" ? "text-red-400" : ""}
+                        ${
+                          valueKey === "goalsConcededPerMatch"
+                            ? "text-white"
+                            : ""
+                        }
+                        ${valueKey === "points" ? "text-red-400" : ""}
+                      `}
                     >
                       {team[valueKey]}
                     </span>
@@ -96,8 +94,6 @@ function StatCard({
             ))
           )}
         </div>
-
-        {/* Footer */}
         {data.length > 3 && (
           <div className="mt-4 pt-3 border-t border-gray-700/50 text-center">
             <p className="text-gray-400 text-xs">
@@ -110,7 +106,6 @@ function StatCard({
   );
 }
 
-// Main StatsCards Component
 export default function StatsCards({
   bestAttack = [],
   bestDefense = [],
@@ -120,18 +115,15 @@ export default function StatsCards({
 }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* Best Attack Card */}
       <StatCard
         title="Best Attack"
-        subtitle="Goals per match"
+        subtitle="Most goals scored (30d)"
         icon="⚡️"
         data={bestAttack}
-        valueKey="goalsPerMatch"
+        valueKey="goalsFor"
         loading={loading}
         onTeamClick={onTeamClick}
       />
-
-      {/* Best Defense Card */}
       <StatCard
         title="Best Defense"
         subtitle="Goals conceded per match"
@@ -141,8 +133,6 @@ export default function StatsCards({
         loading={loading}
         onTeamClick={onTeamClick}
       />
-
-      {/* Best Form Card */}
       <StatCard
         title="Best Form"
         subtitle="Last 5 matches"

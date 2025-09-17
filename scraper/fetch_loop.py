@@ -298,6 +298,12 @@ class FetchLoop:
                 # incidents
                 inc = self._safe_fetch(f"event/{ev_id}/incidents")
                 if inc:
+                    # Keep raw list so EventsProcessor (MatchProcessor) can parse into match_events.
+                    # Our previous overwrite (only parsed list) prevented events from being generated (bundle events=0).
+                    raw_list = inc.get("incidents") if isinstance(inc, dict) else None
+                    if isinstance(raw_list, list):
+                        row["incidents"] = raw_list  # consumed by EventsProcessor.parse
+                    # Also keep a simplified version for fallback player stats builder expecting 'events'
                     row["events"] = self._parse_incidents(inc)
 
                 # stats (raw – kasnije pretvori StatsProcessor)
@@ -332,15 +338,33 @@ class FetchLoop:
             fallback_enabled = os.getenv("FALLBACK_PLAYER_STATS", "1").lower() in {"1","true","yes"}
             for ee in enriched_events:
                 eid = ee.get("event_id")
+                home_tid = ee.get("home_team_sofa") or ee.get("home_team_sofascore_id")
+                away_tid = ee.get("away_team_sofa") or ee.get("away_team_sofascore_id")
                 if ee.get("_raw_statistics"):
-                    all_match_stats.extend(stats_processor.process_match_stats(ee["_raw_statistics"], eid))
+                    # Pass provider team ids so later storage phase can map team_id (was missing -> match_stats ok=0)
+                    all_match_stats.extend(
+                        stats_processor.process_match_stats(
+                            ee["_raw_statistics"],
+                            eid,
+                            home_team_sofa=home_tid,
+                            away_team_sofa=away_tid,
+                        )
+                    )
                 if ee.get("_raw_player_stats"):
-                    all_player_stats.extend(stats_processor.process_player_stats(ee["_raw_player_stats"], eid))
+                    parsed = stats_processor.process_player_stats(ee["_raw_player_stats"], eid)
+                    all_player_stats.extend(parsed)
+                    if os.getenv("LOG_PLAYER_STATS_DEBUG", "0").lower() in {"1","true","yes"}:
+                        logger.info(f"[player_stats_debug] event={eid} direct_rows={len(parsed)}")
                 elif fallback_enabled:
                     # Fallback reconstruction (lineups + incidents)
                     fb = build_player_stats_fallback(ee)
                     if fb:
                         all_player_stats.extend(fb)
+                        if os.getenv("LOG_PLAYER_STATS_DEBUG", "0").lower() in {"1","true","yes"}:
+                            logger.info(f"[player_stats_debug] event={eid} fallback_rows={len(fb)} lineups={len(ee.get('lineups',{}).get('home',[]))+len(ee.get('lineups',{}).get('away',[]))} incidents={len(ee.get('incidents',[]))}")
+                    else:
+                        if os.getenv("LOG_PLAYER_STATS_DEBUG", "0").lower() in {"1","true","yes"}:
+                            logger.warning(f"[player_stats_debug] event={eid} fallback_empty lineups_present={'lineups' in ee} incidents_ct={len(ee.get('incidents',[]))}")
 
             if all_match_stats:
                 bundle["match_stats"] = all_match_stats
@@ -350,6 +374,45 @@ class FetchLoop:
             # log
             for k in ("competitions", "teams", "players", "matches", "lineups", "formations", "events", "player_stats", "match_stats"):
                 logger.info(f"   • {k}: {len(bundle.get(k, []))}")
+
+            # Lightweight scoreboard discrepancy logging (helps detect duplicate/misclassified goals causing 4-3 vs 3-2 issues)
+            try:
+                if os.getenv("LOG_GOAL_MISMATCH", "1").lower() in {"1","true","yes"}:
+                    matches_by_id = { (m.get("source"), m.get("source_event_id")): m for m in bundle.get("matches", []) }
+                    # Group goal events per match
+                    goals_by_match: Dict[tuple, Dict[str,int]] = {}
+                    for ev in bundle.get("events", []):
+                        if ev.get("event_type") in {"goal","penalty_goal","own_goal"}:
+                            key = (ev.get("source"), ev.get("source_event_id"))
+                            if key not in goals_by_match:
+                                goals_by_match[key] = {"home":0,"away":0,"total":0}
+                            side = ev.get("team") or "?"
+                            if side in ("home","away"):
+                                goals_by_match[key][side] += 1
+                                goals_by_match[key]["total"] += 1
+                    for key, counts in goals_by_match.items():
+                        m = matches_by_id.get(key)
+                        if not m:
+                            continue
+                        hs = m.get("home_score")
+                        as_ = m.get("away_score")
+                        if hs is None or as_ is None:
+                            continue
+                        if hs != counts.get("home") or as_ != counts.get("away"):
+                            logger.warning(
+                                f"[goal_mismatch] ev={key[1]} stored_score={hs}-{as_} counted_events={counts.get('home')}-{counts.get('away')} total_goal_events={counts.get('total')}"
+                            )
+                            # Optional verbose dump for the suspicious match
+                            if os.getenv("LOG_GOAL_MISMATCH_VERBOSE", "0").lower() in {"1","true","yes"}:
+                                sample = [
+                                    {
+                                        k: ev.get(k) for k in ("id","minute","event_type","player_sofascore_id","assist_player_sofascore_id","team")
+                                    }
+                                    for ev in bundle.get("events", []) if ev.get("source_event_id") == key[1] and ev.get("event_type") in {"goal","penalty_goal","own_goal"}
+                                ]
+                                logger.warning(f"[goal_mismatch_dump] ev={key[1]} events={sample}")
+            except Exception as mx:
+                logger.debug(f"goal mismatch logging failed: {mx}")
             return bundle
         except Exception as e:
             import traceback
@@ -495,12 +558,23 @@ class FetchLoop:
             # match stats
             mstats = bundle.get("match_stats", [])
             if mstats:
+                # Diagnostics: understand zero upsert cases
+                if os.getenv("LOG_MATCH_STATS_DEBUG", "1").lower() in {"1","true","yes"}:
+                    total_rows = len(mstats)
+                    missing_match = sum(1 for r in mstats if not r.get("match_id"))
+                    missing_team = sum(1 for r in mstats if not r.get("team_sofascore_id") and not r.get("team_id"))
+                    logger.info(
+                        f"[match_stats_debug] incoming_rows={total_rows} missing_match_id={missing_match} missing_team_identifier={missing_team} sample={mstats[:2]}"
+                    )
                 for r in mstats:
                     tup = (r.get("source"), r.get("source_event_id"))
                     if tup in match_map:
                         r["match_id"] = match_map[tup]
                     if (ts := r.get("team_sofascore_id")) in team_map:
                         r["team_id"] = team_map[ts]
+                if os.getenv("LOG_MATCH_STATS_DEBUG", "1").lower() in {"1","true","yes"}:
+                    mapped = sum(1 for r in mstats if r.get("match_id") and r.get("team_id"))
+                    logger.info(f"[match_stats_debug] after_mapping fully_mapped={mapped}/{len(mstats)}")
                 ok, fail = db.upsert_match_stats(mstats)
                 res["match_stats"] = {"ok": ok, "fail": fail}; total += ok
                 logger.info(f"✅ match_stats:  ok={ok}, fail={fail}")

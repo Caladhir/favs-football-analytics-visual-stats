@@ -1,22 +1,32 @@
 // src/hooks/useMatchesByDate.js
 import { useState, useEffect, useCallback, useRef } from "react";
 import supabase from "../services/supabase";
+import { reconcileScoresArray } from "../utils/reconcileScore";
 
 const matchesCache = new Map();
 const CACHE_DURATION = 5 * 60 * 1000;
 
-const formatDateForDB = (date) => {
-  if (!date) return null;
-
-  const d = new Date(date);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
+// Build stable cache key using the user's local civil date (so navigation is intuitive)
+// Increment CACHE_VERSION when schema/derived fields logic changes (e.g., score reconciliation refactor)
+const CACHE_VERSION = 2; // bumped from 1 -> 2 to invalidate stale entries lacking provider-first display_* fields
+const getCacheKey = (date) => {
+  if (!date) return "";
+  return `${new Date(date).toDateString()}::v${CACHE_VERSION}`;
 };
 
-const getCacheKey = (date) => formatDateForDB(date);
+// Returns precise UTC day bounds for the *local* selected civil date.
+// Example: If user timezone is UTC+2 and selects 2025-09-09, startUTC becomes 2025-09-08T22:00:00.000Z
+// Previously we constructed "YYYY-MM-DDT00:00:00Z" which incorrectly shifted the window forward
+// and dropped matches in the first local hours of the day.
+const getDayBoundsUTC = (date) => {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0); // local midnight
+  const start = d.toISOString(); // correct UTC equivalent of local midnight
+  const endDate = new Date(d.getTime());
+  endDate.setDate(endDate.getDate() + 1);
+  const end = endDate.toISOString();
+  return { start, end };
+};
 const isCacheValid = (timestamp) => Date.now() - timestamp < CACHE_DURATION;
 
 export default function useMatchesByDate(selectedDate, options = {}) {
@@ -84,17 +94,12 @@ export default function useMatchesByDate(selectedDate, options = {}) {
         }
         setError(null);
 
-        //  Date range calculation
-        const dateStr = formatDateForDB(date);
-        const nextDay = new Date(date);
-        nextDay.setDate(nextDay.getDate() + 1);
-        const nextDayStr = formatDateForDB(nextDay);
-
+        //  Accurate UTC range for the selected *local* civil date
+        const { start: dayStartUTC, end: dayEndUTC } = getDayBoundsUTC(date);
+        const dbgLocal = new Date(date);
+        console.log(`🔍 Fetching matches (request #${requestId})`);
         console.log(
-          `🔍 Fetching matches for ${dateStr} (request #${requestId})`
-        );
-        console.log(
-          `📅 Date range: ${dateStr}T00:00:00Z to ${nextDayStr}T00:00:00Z`
+          `📅 Local date: ${dbgLocal.toDateString()} | UTC window: ${dayStartUTC} -> ${dayEndUTC}`
         );
 
         const { data, error: fetchError } = await supabase
@@ -107,8 +112,8 @@ export default function useMatchesByDate(selectedDate, options = {}) {
         `
           )
           //  Dodati Z za UTC timezone
-          .gte("start_time", `${dateStr}T00:00:00Z`)
-          .lt("start_time", `${nextDayStr}T00:00:00Z`)
+          .gte("start_time", dayStartUTC)
+          .lt("start_time", dayEndUTC)
           .order("start_time", { ascending: true })
           .abortSignal(currentController.signal);
 
@@ -149,12 +154,32 @@ export default function useMatchesByDate(selectedDate, options = {}) {
           return match;
         });
 
-        // Cache rezultate
+        // --- Score reconciliation (events vs stored scores) -----------------
+        try {
+          const ids = matchesData.map((m) => m.id);
+          if (ids.length) {
+            const { data: evRows, error: evErr } = await supabase
+              .from("match_events")
+              .select("match_id,event_type,team,minute,player_name,created_at")
+              .in("match_id", ids);
+            if (!evErr && Array.isArray(evRows)) {
+              matchesData = reconcileScoresArray(matchesData, evRows);
+            } else if (evErr) {
+              console.warn("⚠️ Event fetch error for reconciliation", evErr);
+            }
+          }
+        } catch (reErr) {
+          console.warn("⚠️ Score reconciliation failed", reErr);
+        }
+
+        // Cache rezultate (with reconciliation augmentation)
         setCachedMatches(date, matchesData);
         setMatches(matchesData);
 
         console.log(
-          `✅ Fetched ${matchesData.length} matches for ${dateStr} (request #${requestId})`
+          `✅ Fetched ${
+            matchesData.length
+          } matches for ${dbgLocal.toDateString()} (request #${requestId})`
         );
         return matchesData;
       } catch (err) {
